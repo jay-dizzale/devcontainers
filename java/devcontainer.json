@@ -1,0 +1,44 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/ubuntu
+{
+	"name": "java",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "java",
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	"workspaceFolder": "/workspace",
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+	// Use 'postCreateCommand' to run commands after the container is created.
+	// Configure tool-specific properties.
+	"customizations": {
+		// Configure properties specific to VS Code.
+		"vscode": {
+			// Set *default* container specific settings.json values on container create.
+			"settings": {
+				"editor.formatOnSave": true,
+				"files.insertFinalNewline": true,
+				"dev.containers.copyGitConfig": false
+			},
+			// Add the IDs of extensions you want installed when the container is created.
+			"extensions": [
+				"github.vscode-github-actions",
+				"yzhang.markdown-all-in-one",
+				"redhat.vscode-yaml",
+				"mhutchie.git-graph",
+				"ecmel.vscode-html-css",
+				"vscjava.vscode-java-debug",
+				"vscjava.vscode-java-pack",
+				"redhat.java",
+				"vscjava.vscode-maven",
+				"vscjava.vscode-java-dependency",
+				"vscjava.vscode-java-test",
+				"chadalen.vscode-jetbrains-icon-theme",
+				"anthropic.claude-code",
+				"ExodiusStudios.comment-anchors"
+			]
+		}
+	},
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	"remoteUser": "ubuntu"
+}

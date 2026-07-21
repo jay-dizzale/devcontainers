@@ -1,0 +1,1 @@
+export TENV_AUTO_INSTALL=true

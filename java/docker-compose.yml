@@ -1,0 +1,13 @@
+services:
+  java:
+    extends:
+      file: ../common/base.docker-compose.yml
+      service: base
+    build:
+      context: ..
+      dockerfile: ./java/Dockerfile
+      args:
+        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-0}
+        JAVA_VERSION: ${JAVA_VERSION:-}
+    volumes:
+      - ~/.m2:/home/ubuntu/.m2

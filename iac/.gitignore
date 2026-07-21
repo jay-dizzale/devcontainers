@@ -1,0 +1,4 @@
+.aws/
+.az/
+.terraform.d/
+.azure/

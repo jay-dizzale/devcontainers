@@ -1,0 +1,7 @@
+export AWS_REGION="eu-central-1"
+export AWS_PROFILE="org-mgmt"
+export KAFKA_INSTALL_DIR=/opt/kafka
+export PATH=${KAFKA_INSTALL_DIR}/bin:$PATH
+export TENV_AUTO_INSTALL=true
+export UV_LINK_MODE=copy
+export PATH="/home/ubuntu/.local/bin:$PATH"

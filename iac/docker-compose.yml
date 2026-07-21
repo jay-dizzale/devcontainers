@@ -1,0 +1,17 @@
+services:
+  iac:
+    build:
+      context: ..
+      dockerfile: iac/Dockerfile
+      args:
+        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-0}
+    extends:
+      file: ../common/base.docker-compose.yml
+      service: base
+    network_mode: host
+    volumes:
+      - ./.zshrc2:/home/ubuntu/.zshrc2
+      - ~/.aws/:/home/ubuntu/.aws
+      - ~/.azure:/home/ubuntu/.azure
+      - ~/.terraform.d:/home/ubuntu/.terraform.d
+      - ~/.spacelift:/home/ubuntu/.spacelift

@@ -1,0 +1,10 @@
+services:
+  ruby:
+    build:
+      context: ..
+      dockerfile: ruby/Dockerfile
+      args:
+        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-0}
+    extends:
+      file: ../common/base.docker-compose.yml
+      service: base

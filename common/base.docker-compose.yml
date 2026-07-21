@@ -1,0 +1,18 @@
+services:
+  base:
+    init: true
+    user: 1000:1000
+    environment:
+      - LANG=en_US.UTF-8
+      - LANGUAGE=en_US:en
+      - LC_ALL=en_US.UTF-8
+    volumes:
+      - ../common/.zshrc:/home/ubuntu/.zshrc:ro
+      - ../common/.history:/home/ubuntu/.history
+      - ${VOLUME:-../..}:/workspace
+      - ~/.config/tea/config.yml:/home/ubuntu/.config/tea/config.yml:ro
+      - ~/.config/gh:/home/ubuntu/.config/gh:ro
+      # Claude Code writes session/auth state back to these — must stay RW.
+      - ~/.claude:/home/ubuntu/.claude
+      - ~/.claude.json:/home/ubuntu/.claude.json
+    command: ["sleep", "infinity"]

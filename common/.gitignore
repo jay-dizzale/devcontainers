@@ -1,0 +1,14 @@
+.config/
+.config/**
+.history/
+.history/**
+.aws
+.aws/**
+.azure
+.azure/**
+.spacelift
+.spacelift/**
+.terraform.d
+.terraform.d/**
+.m2
+.m2/**
