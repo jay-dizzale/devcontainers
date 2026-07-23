@@ -8,7 +8,6 @@ services:
     extends:
       file: ../common/base.docker-compose.yml
       service: base
-    network_mode: host
     volumes:
       - ./.zshrc2:/home/ubuntu/.zshrc2
       - ~/.aws/:/home/ubuntu/.aws
