@@ -14,7 +14,10 @@
 KAFKA_VERSION="${KAFKA_VERSION:-}"
 if [ -z "${KAFKA_VERSION}" ]; then
     echo "Resolving latest stable Kafka release ..."
-    KAFKA_VERSION="$(github_latest_stable apache/kafka)"
+    KAFKA_VERSION="$(wget -qO- 'https://downloads.apache.org/kafka/' 2>/dev/null \
+        | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' \
+        | sort -V \
+        | tail -1)"
     [ -n "${KAFKA_VERSION}" ] || { echo "ERROR: could not resolve latest Kafka version" >&2; exit 1; }
 fi
 KAFKA_SCALA_VERSION="${KAFKA_SCALA_VERSION:-2.13}"
