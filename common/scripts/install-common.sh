@@ -24,6 +24,7 @@ apt-get install -qqy apt-transport-https \
   make \
   make build-essential \
   mandoc \
+  socat \
   software-properties-common \
   tk-dev \
   unzip \

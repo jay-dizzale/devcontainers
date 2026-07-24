@@ -8,6 +8,8 @@ services:
     extends:
       file: ../common/base.docker-compose.yml
       service: base
+    ports:
+      - "127.0.0.1:40000-40099:40000-40099" # high port range for SSO login flow callback forwarding
     volumes:
       - ./.zshrc2:/home/ubuntu/.zshrc2
       - ~/.aws/:/home/ubuntu/.aws

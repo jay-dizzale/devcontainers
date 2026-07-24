@@ -5,6 +5,8 @@ services:
       dockerfile: ruby/Dockerfile
       args:
         INSTALL_CLAUDE: ${INSTALL_CLAUDE:-0}
+    ports:
+      - "127.0.0.1:3010-3019:3000" # Rails/Puma default dev server
     extends:
       file: ../common/base.docker-compose.yml
       service: base

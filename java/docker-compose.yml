@@ -9,5 +9,8 @@ services:
       args:
         INSTALL_CLAUDE: ${INSTALL_CLAUDE:-0}
         JAVA_VERSION: ${JAVA_VERSION:-}
+    ports:
+      - "127.0.0.1:8080-8089:8080" # Spring Boot default dev server
+      - "127.0.0.1:5005-5014:5005" # JDWP default debug port
     volumes:
       - ~/.m2:/home/ubuntu/.m2
