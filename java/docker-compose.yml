@@ -7,7 +7,7 @@ services:
       context: ..
       dockerfile: ./java/Dockerfile
       args:
-        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-0}
+        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-1}
         JAVA_VERSION: ${JAVA_VERSION:-}
     ports:
       - "127.0.0.1:8080-8089:8080" # Spring Boot default dev server

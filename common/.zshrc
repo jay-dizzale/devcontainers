@@ -40,3 +40,5 @@ git config --global --add safe.directory '*'
 git config --global --add --bool push.autoSetupRemote true
 
 export PATH="$HOME/.local/bin:$PATH"
+
+[ -t 1 ] && motd

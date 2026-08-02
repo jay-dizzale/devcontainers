@@ -7,4 +7,4 @@ services:
       context: ..
       dockerfile: latex/Dockerfile
       args:
-        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-0}
+        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-1}

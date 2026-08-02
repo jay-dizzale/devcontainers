@@ -7,7 +7,7 @@ services:
       context: ..
       dockerfile: ./web/Dockerfile
       args:
-        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-0}
+        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-1}
     ports:
       - "127.0.0.1:3000-3009:3000" # Node/Express default dev server
       - "127.0.0.1:5173-5182:5173" # Vite default dev server

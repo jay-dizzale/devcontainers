@@ -7,7 +7,7 @@ services:
       context: ..
       dockerfile: ./rust/Dockerfile
       args:
-        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-0}
+        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-1}
     ports:
       - "127.0.0.1:8000-8009:8000" # Rocket default dev server
       - "127.0.0.1:8100-8109:8080" # Actix/common Rust dev server default

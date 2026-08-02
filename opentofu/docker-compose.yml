@@ -4,7 +4,7 @@ services:
       context: ..
       dockerfile: opentofu/Dockerfile
       args:
-        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-0}
+        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-1}
     extends:
       file: ../common/base.docker-compose.yml
       service: base

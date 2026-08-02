@@ -70,11 +70,17 @@ echo "📂 Working in: $(pwd)"
 echo "📁 Mounting volume: ${VOLUME}"
 
 # ---------------------------------------------------------------------------
-# Derive a stable, per-volume project name so the same directory always maps
-# to the same container (and distinct directories get distinct containers).
+# Derive a human-readable project name: <env>_<parent>_<current>
+# e.g. java_projects_myapp  — sanitised to lowercase alphanumeric + hyphens.
 # ---------------------------------------------------------------------------
-VOLUME_HASH="$(printf '%s' "$VOLUME" | cksum | cut -d' ' -f1)"
-COMPOSE_PROJECT_NAME="$(basename "$COMPOSE_DIR")_${VOLUME_HASH}"
+_sanitize() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/-*$//'; }
+_vol_parent="$(_sanitize "$(basename "$(dirname "$VOLUME")")")"
+_vol_current="$(_sanitize "$(basename "$VOLUME")")"
+if [ -n "$_vol_parent" ]; then
+    COMPOSE_PROJECT_NAME="$(basename "$COMPOSE_DIR")_${_vol_parent}_${_vol_current}"
+else
+    COMPOSE_PROJECT_NAME="$(basename "$COMPOSE_DIR")_${_vol_current}"
+fi
 export COMPOSE_PROJECT_NAME
 
 # ---------------------------------------------------------------------------
