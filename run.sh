@@ -17,16 +17,21 @@ die() { echo "❌ ERROR: $*" >&2; exit 1; }
 # ---------------------------------------------------------------------------
 VOLUME="$INVOCATION_DIR"
 REBUILD=0
+DEBUG=0
 while [ $# -gt 0 ]; do
     case "$1" in
         -v|--volume)
             [ $# -ge 2 ] || die "--volume requires a value"
             VOLUME="$2"; shift 2 ;;
         -r|--rebuild) REBUILD=1; shift ;;
+        --debug)      DEBUG=1;   shift ;;
         *) die "Unknown argument: $1" ;;
     esac
 done
 export VOLUME
+
+PROGRESS=""
+[ "$DEBUG" = "1" ] && PROGRESS="--progress=plain"
 
 # ---------------------------------------------------------------------------
 # Proxy — source proxy.env if present; Docker BuildKit forwards these to build
@@ -122,9 +127,11 @@ else
         *)            export INSTALL_CLAUDE=0 ;;
     esac
     if [ "$REBUILD" = "1" ]; then
-        docker compose build --no-cache --progress=plain || die "Failed to build stack."
+        # shellcheck disable=SC2086
+        docker compose build --no-cache $PROGRESS || die "Failed to build stack."
     fi
-    docker compose up -d --build || die "Failed to start stack."
+    # shellcheck disable=SC2086
+    docker compose up -d --build $PROGRESS || die "Failed to start stack."
 fi
 
 cleanup() {
