@@ -130,8 +130,7 @@ else
         # shellcheck disable=SC2086
         docker compose build --no-cache $PROGRESS || die "Failed to build stack."
     fi
-    # shellcheck disable=SC2086
-    docker compose up -d --build $PROGRESS || die "Failed to start stack."
+    docker compose up -d --build || die "Failed to start stack."
 fi
 
 cleanup() {
