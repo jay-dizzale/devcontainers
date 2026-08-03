@@ -136,7 +136,10 @@ else
         y|Y|yes|YES) export INSTALL_CLAUDE=1 ;;
         *)            export INSTALL_CLAUDE=0 ;;
     esac
-    docker compose up -d --build || die "Failed to start stack."
+    _up_build="--build"
+    [ "$REBUILD" = "1" ] && _up_build=""
+    # shellcheck disable=SC2086
+    docker compose up -d $_up_build || die "Failed to start stack."
 fi
 
 cleanup() {
