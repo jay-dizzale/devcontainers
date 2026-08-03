@@ -1,6 +1,14 @@
 #!/bin/sh
 . /usr/local/lib/shell/download-utils.sh
 
+# Install custom CA certificates first so all subsequent wget/curl/apt calls
+# trust the proxy's certificate when SSL inspection is active.
+if ls /tmp/certs/*.crt 2>/dev/null | grep -q .; then
+    echo "Installing custom CA certificates ..."
+    cp /tmp/certs/*.crt /usr/local/share/ca-certificates/
+    update-ca-certificates
+fi
+
 apt-get update -qq
 apt-get install -qqy apt-transport-https \
   curl \
@@ -39,12 +47,5 @@ localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 
 sh install-gh.sh
 sh install-tea.sh
-
-# Install custom CA certificates if any were placed in common/scripts/certs/
-if ls /tmp/certs/*.crt 2>/dev/null | grep -q .; then
-    echo "Installing custom CA certificates ..."
-    cp /tmp/certs/*.crt /usr/local/share/ca-certificates/
-    update-ca-certificates
-fi
 
 install -m 755 /tmp/motd.sh /usr/local/bin/motd
