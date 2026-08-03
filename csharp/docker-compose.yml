@@ -8,6 +8,12 @@ services:
       dockerfile: ./csharp/Dockerfile
       args:
         INSTALL_CLAUDE: ${INSTALL_CLAUDE:-1}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
     ports:
       - "127.0.0.1:5020-5029:5000" # Kestrel default HTTP dev server
       - "127.0.0.1:5030-5039:5001" # Kestrel default HTTPS dev server

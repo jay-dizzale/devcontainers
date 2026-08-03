@@ -8,6 +8,12 @@ services:
       dockerfile: ./go/Dockerfile
       args:
         INSTALL_CLAUDE: ${INSTALL_CLAUDE:-1}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
     ports:
       - "127.0.0.1:8090-8099:8080" # common Go net/http dev server default
       - "127.0.0.1:2345-2354:2345" # Delve default debug port
