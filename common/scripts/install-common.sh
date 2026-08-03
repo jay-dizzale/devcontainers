@@ -1,15 +1,20 @@
 #!/bin/sh
 . /usr/local/lib/shell/download-utils.sh
 
-# Install custom CA certificates first so all subsequent wget/curl/apt calls
-# trust the proxy's certificate when SSL inspection is active.
+# Bootstrap: get ca-certificates so update-ca-certificates is available.
+# Ubuntu mirrors use HTTP so no proxy cert is needed for this step.
+apt-get update -qq
+apt-get install -y --no-install-recommends ca-certificates
+
+# Install custom CA certificates before any HTTPS calls so a
+# SSL-inspecting proxy is trusted for all subsequent steps.
 if ls /tmp/certs/*.crt 2>/dev/null | grep -q .; then
     echo "Installing custom CA certificates ..."
+    mkdir -p /usr/local/share/ca-certificates/
     cp /tmp/certs/*.crt /usr/local/share/ca-certificates/
     update-ca-certificates
 fi
 
-apt-get update -qq
 apt-get install -qqy apt-transport-https \
   curl \
   git \
