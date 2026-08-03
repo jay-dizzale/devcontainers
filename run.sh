@@ -26,6 +26,14 @@ while [ $# -gt 0 ]; do
 done
 export VOLUME
 
+# ---------------------------------------------------------------------------
+# Proxy — source proxy.env if present; Docker BuildKit forwards these to build
+# ---------------------------------------------------------------------------
+if [ -f "$SCRIPT_DIR/proxy.env" ]; then
+    . "$SCRIPT_DIR/proxy.env"
+    export HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy
+fi
+
 pick_from_list() {
     label="$1"; shift
     echo "${label}:" >&2
