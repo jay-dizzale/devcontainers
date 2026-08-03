@@ -16,11 +16,13 @@ die() { echo "❌ ERROR: $*" >&2; exit 1; }
 # Arguments  (-v defaults to the directory run.sh was called from)
 # ---------------------------------------------------------------------------
 VOLUME="$INVOCATION_DIR"
+REBUILD=0
 while [ $# -gt 0 ]; do
     case "$1" in
         -v|--volume)
             [ $# -ge 2 ] || die "--volume requires a value"
             VOLUME="$2"; shift 2 ;;
+        -r|--rebuild) REBUILD=1; shift ;;
         *) die "Unknown argument: $1" ;;
     esac
 done
@@ -119,6 +121,9 @@ else
         y|Y|yes|YES) export INSTALL_CLAUDE=1 ;;
         *)            export INSTALL_CLAUDE=0 ;;
     esac
+    if [ "$REBUILD" = "1" ]; then
+        docker compose build --no-cache --progress=plain || die "Failed to build stack."
+    fi
     docker compose up -d --build || die "Failed to start stack."
 fi
 
