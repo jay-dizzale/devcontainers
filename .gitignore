@@ -9,6 +9,10 @@
 *.pem
 *.key
 *.crt
+*.cer
+*.der
+*.p7b
+*.p7c
 *.p12
 *.pfx
 id_rsa*
