@@ -99,6 +99,16 @@ fi
 export COMPOSE_PROJECT_NAME
 
 # ---------------------------------------------------------------------------
+# Force rebuild — tears down first so --no-cache is never skipped.
+# ---------------------------------------------------------------------------
+if [ "$REBUILD" = "1" ]; then
+    echo "🔨 Rebuilding from scratch (no cache) ..."
+    docker compose down 2>/dev/null || true
+    # shellcheck disable=SC2086
+    docker compose build --no-cache $PROGRESS || die "Failed to build stack."
+fi
+
+# ---------------------------------------------------------------------------
 # Start stack — reuse the existing container if it's already running.
 # ---------------------------------------------------------------------------
 if [ -n "$(docker compose ps --status running -q 2>/dev/null || true)" ]; then
@@ -126,10 +136,6 @@ else
         y|Y|yes|YES) export INSTALL_CLAUDE=1 ;;
         *)            export INSTALL_CLAUDE=0 ;;
     esac
-    if [ "$REBUILD" = "1" ]; then
-        # shellcheck disable=SC2086
-        docker compose build --no-cache $PROGRESS || die "Failed to build stack."
-    fi
     docker compose up -d --build || die "Failed to start stack."
 fi
 
