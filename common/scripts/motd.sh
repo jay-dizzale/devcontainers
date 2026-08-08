@@ -94,6 +94,7 @@ _tool "spacectl"       spacectl version
 # Dev tools
 _tool "gh"             gh --version
 _tool "tea"            tea --version
+_tool "snyk"           snyk --version
 _tool "claude"         claude --version
 _tool "git"            git --version
 
