@@ -82,6 +82,17 @@ You'll be prompted to:
 The same host directory always maps to the same container, so re-running `run.sh`
 reconnects to your existing stack instead of rebuilding.
 
+### Stop & delete a stack
+
+```sh
+sh run.sh stop                    # tear down stacks mounted from the current directory
+sh run.sh stop -v /path/to/project
+```
+
+This finds every container whose `/workspace` mount points at that directory and
+runs `docker compose down -v` for each matching stack (containers, networks and
+anonymous volumes removed).
+
 ## Run it (VS Code / DevContainers)
 
 Open the environment's folder (e.g. `iac/`) in VS Code and choose

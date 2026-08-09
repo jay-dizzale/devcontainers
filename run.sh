@@ -1,6 +1,7 @@
 #!/bin/sh
 # run.sh — Interactive launcher for docker-compose stacks.
 # Usage: run.sh [-v /path/to/mount]
+#        run.sh stop [-v /path/to/mount]   — stop & delete stacks mounted from that dir
 
 set -eu
 
@@ -13,13 +14,53 @@ INVOCATION_DIR="$(pwd)"
 die() { echo "❌ ERROR: $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
+# `stop` subcommand — find every compose project whose /workspace mount
+# points at the given directory (default: current directory) and tear it
+# down (containers, networks and anonymous volumes removed).
+# ---------------------------------------------------------------------------
+cmd_stop() {
+    target="$1"
+    echo "🔍 Looking for containers mounted from: $target"
+
+    candidates="$(docker ps -a -q --filter "label=com.docker.compose.project" 2>/dev/null || true)"
+    [ -n "$candidates" ] || die "No devcontainer stacks found."
+
+    matches=""
+    for cid in $candidates; do
+        src="$(docker inspect "$cid" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
+        [ "$src" = "$target" ] && matches="$matches $cid"
+    done
+    [ -n "$matches" ] || die "No containers mounted from $target."
+
+    projects="$(
+        for cid in $matches; do
+            docker inspect "$cid" --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
+        done | sort -u
+    )"
+
+    echo "$projects" | while IFS='|' read -r proj workdir; do
+        [ -n "$proj" ] || continue
+        echo "🛑 Stopping & deleting stack '$proj' (in $workdir) ..."
+        if [ -n "$workdir" ] && [ -d "$workdir" ]; then
+            ( cd "$workdir" && COMPOSE_PROJECT_NAME="$proj" docker compose down -v ) \
+                || echo "⚠️  Failed to tear down $proj" >&2
+        else
+            docker compose -p "$proj" down -v || echo "⚠️  Failed to tear down $proj" >&2
+        fi
+    done
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
 # Arguments  (-v defaults to the directory run.sh was called from)
 # ---------------------------------------------------------------------------
+STOP=0
 VOLUME="$INVOCATION_DIR"
 REBUILD=0
 DEBUG=0
 while [ $# -gt 0 ]; do
     case "$1" in
+        stop)         STOP=1;    shift ;;
         -v|--volume)
             [ $# -ge 2 ] || die "--volume requires a value"
             VOLUME="$2"; shift 2 ;;
@@ -29,6 +70,10 @@ while [ $# -gt 0 ]; do
     esac
 done
 export VOLUME
+
+if [ "$STOP" = "1" ]; then
+    cmd_stop "$(cd "$VOLUME" && pwd)"
+fi
 
 PROGRESS=""
 [ "$DEBUG" = "1" ] && PROGRESS="--progress=plain"

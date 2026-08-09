@@ -52,6 +52,6 @@ localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 
 sh install-gh.sh
 sh install-tea.sh
-sh install-snyk.sh
+sh install-trivy.sh
 
 install -m 755 /tmp/motd.sh /usr/local/bin/motd
