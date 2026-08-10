@@ -14,6 +14,12 @@ services:
         http_proxy: ${http_proxy:-}
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
+      secrets:
+        - github_token
     ports:
       - "127.0.0.1:8000-8009:8000" # Rocket default dev server
       - "127.0.0.1:8100-8109:8080" # Actix/common Rust dev server default
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

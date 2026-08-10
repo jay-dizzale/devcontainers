@@ -4,13 +4,13 @@ FROM ubuntu:noble
 ADD ./common/lib/ /usr/local/lib/shell/
 ADD ./common/scripts/ /tmp/
 WORKDIR /tmp
-RUN sh /tmp/install-common.sh
+RUN --mount=type=secret,id=github_token sh /tmp/install-common.sh
 ARG INSTALL_CLAUDE=0
 RUN [ "${INSTALL_CLAUDE}" = "1" ] && sh /tmp/install-claude.sh || true
 
 ## Dependencies for ruby-build
 ADD ruby/scripts/ /tmp/
-RUN sh /tmp/install-ruby.sh
+RUN --mount=type=secret,id=github_token sh /tmp/install-ruby.sh
 
 ## Cleanup
 RUN rm -rf /tmp/*

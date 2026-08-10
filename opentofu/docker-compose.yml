@@ -11,8 +11,14 @@ services:
         http_proxy: ${http_proxy:-}
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
+      secrets:
+        - github_token
     extends:
       file: ../common/base.docker-compose.yml
       service: base
     volumes:
       - ./.zshrc2:/home/ubuntu/.zshrc2
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

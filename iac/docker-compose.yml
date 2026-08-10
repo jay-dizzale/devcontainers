@@ -11,6 +11,8 @@ services:
         http_proxy: ${http_proxy:-}
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
+      secrets:
+        - github_token
     extends:
       file: ../common/base.docker-compose.yml
       service: base
@@ -21,3 +23,7 @@ services:
       - ~/.azure:/home/ubuntu/.azure
       - ~/.terraform.d:/home/ubuntu/.terraform.d
       - ~/.spacelift:/home/ubuntu/.spacelift
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

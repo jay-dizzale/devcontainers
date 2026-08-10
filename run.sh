@@ -86,6 +86,16 @@ if [ -f "$SCRIPT_DIR/proxy.env" ]; then
     export HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy
 fi
 
+# ---------------------------------------------------------------------------
+# GitHub token — optional; raises the unauthenticated api.github.com rate
+# limit (60 req/hr per IP) used when resolving "latest" tool versions.
+# Passed to builds as a BuildKit secret (never baked into image layers).
+# Always exported (even empty) so the compose `secrets.environment` lookup
+# doesn't fail when unset.
+# ---------------------------------------------------------------------------
+GITHUB_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+export GITHUB_TOKEN
+
 pick_from_list() {
     label="$1"; shift
     echo "${label}:" >&2

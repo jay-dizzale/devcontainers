@@ -6,7 +6,7 @@ LABEL description="Development environment for ARM architecture with tools for O
 ADD ./common/lib/ /usr/local/lib/shell/
 ADD ./common/scripts/ /tmp/
 WORKDIR /tmp
-RUN sh /tmp/install-common.sh
+RUN --mount=type=secret,id=github_token sh /tmp/install-common.sh
 ARG INSTALL_CLAUDE=0
 RUN [ "${INSTALL_CLAUDE}" = "1" ] && sh /tmp/install-claude.sh || true
 

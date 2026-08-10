@@ -14,6 +14,12 @@ services:
         http_proxy: ${http_proxy:-}
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
+      secrets:
+        - github_token
     ports:
       - "127.0.0.1:5020-5029:5000" # Kestrel default HTTP dev server
       - "127.0.0.1:5030-5039:5001" # Kestrel default HTTPS dev server
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

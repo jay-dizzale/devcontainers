@@ -109,6 +109,24 @@ load_env() {
 }
 
 # ---------------------------------------------------------------------------
+# wget wrapper for GitHub API calls. Optional — if GITHUB_TOKEN (or GH_TOKEN)
+# is set in the environment, it's sent as a Bearer token to raise the
+# unauthenticated rate limit (60 req/hr per IP, shared by every build).
+# Arguments: same as wget.
+# ---------------------------------------------------------------------------
+_github_wget() {
+    _gh_token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    if [ -z "${_gh_token}" ] && [ -f /run/secrets/github_token ]; then
+        _gh_token="$(cat /run/secrets/github_token)"
+    fi
+    if [ -n "${_gh_token}" ]; then
+        wget --header="Authorization: Bearer ${_gh_token}" "$@"
+    else
+        wget "$@"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Resolve the latest stable release tag from a GitHub repository.
 # Uses /releases/latest which already excludes drafts and pre-releases.
 # Strips any leading 'v' prefix from the returned tag.
@@ -119,7 +137,7 @@ load_env() {
 github_latest_stable() {
     _repo="$1"
     _strip="${2:-}"
-    _tag="$(wget -qO- "https://api.github.com/repos/${_repo}/releases/latest" 2>/dev/null \
+    _tag="$(_github_wget -qO- "https://api.github.com/repos/${_repo}/releases/latest" 2>/dev/null \
         | jq -r '.tag_name // empty')"
     [ -n "${_tag}" ] || { echo "ERROR: no release found for ${_repo}" >&2; return 1; }
     _tag="${_tag#v}"
@@ -140,7 +158,7 @@ github_latest_matching() {
     _repo="$1"
     _pat="$2"
     _strip="${3:-}"
-    wget -qO- "https://api.github.com/repos/${_repo}/releases?per_page=20" 2>/dev/null \
+    _github_wget -qO- "https://api.github.com/repos/${_repo}/releases?per_page=20" 2>/dev/null \
         | jq -r --arg pat "${_pat}" --arg strip "${_strip}" \
             '[.[] | select(.prerelease == false and .draft == false)
                   | .tag_name | ltrimstr("v") | ltrimstr($strip)

@@ -15,7 +15,7 @@ RUBY_VERSION="${1:-}"
 if [ -z "${RUBY_VERSION}" ]; then
     echo "Resolving latest stable Ruby release ..."
     # ruby/ruby tags stable releases as vX_Y_Z; filter out preview/rc entries.
-    RUBY_VERSION="$(wget -qO- 'https://api.github.com/repos/ruby/ruby/releases?per_page=20' 2>/dev/null \
+    RUBY_VERSION="$(_github_wget -qO- 'https://api.github.com/repos/ruby/ruby/releases?per_page=20' 2>/dev/null \
         | jq -r '[.[] | select(.prerelease == false and .draft == false)
                        | select(.tag_name | test("^v[0-9]+_[0-9]+_[0-9]+$"))
                        | .tag_name][0]

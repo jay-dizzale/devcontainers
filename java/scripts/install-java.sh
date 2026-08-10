@@ -13,7 +13,7 @@ if [ -z "${JAVA_VERSION}" ]; then
     # Corretto tracks each major in a separate repo; find the newest with a recent release.
     # Java LTS releases: 8, 11, 17, 21, 25, ... — check latest known LTS majors newest-first.
     for _major in 25 21 17; do
-        _tag="$(wget -qO- "https://api.github.com/repos/corretto/corretto-${_major}/releases/latest" 2>/dev/null \
+        _tag="$(_github_wget -qO- "https://api.github.com/repos/corretto/corretto-${_major}/releases/latest" 2>/dev/null \
             | jq -r '.tag_name // empty')"
         if [ -n "${_tag}" ]; then
             JAVA_VERSION="${_major}"

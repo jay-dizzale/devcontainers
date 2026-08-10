@@ -107,6 +107,15 @@ Open the environment's folder (e.g. `iac/`) in VS Code and choose
 - **Per-environment shell tweaks** — add a `.zshrc2` (already wired up for `iac`,
   `opentofu`, `uv`).
 - **Trim it down** — remove environment folders you don't need.
+- **GitHub API rate limit** — optional. Some install scripts fall back to the
+  GitHub API to resolve "latest" versions, which is capped at 60 unauthenticated
+  requests/hour per IP. Export `GITHUB_TOKEN` (or `GH_TOKEN`) before running
+  `run.sh`/`dev` and it's passed to the build as a BuildKit secret — never baked
+  into the image layers:
+  ```sh
+  export GITHUB_TOKEN=ghp_xxx
+  sh run.sh
+  ```
 
 ## Stop it
 

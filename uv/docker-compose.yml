@@ -11,6 +11,8 @@ services:
         http_proxy: ${http_proxy:-}
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
+      secrets:
+        - github_token
     extends:
       file: ../common/base.docker-compose.yml
       service: base
@@ -18,3 +20,7 @@ services:
       - "127.0.0.1:8010-8019:8000" # Django default dev server
     volumes:
       - ./.zshrc2:/home/ubuntu/.zshrc2
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

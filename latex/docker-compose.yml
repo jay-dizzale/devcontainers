@@ -14,3 +14,9 @@ services:
         http_proxy: ${http_proxy:-}
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
+      secrets:
+        - github_token
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

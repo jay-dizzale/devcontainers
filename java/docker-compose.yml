@@ -15,8 +15,14 @@ services:
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
         JAVA_VERSION: ${JAVA_VERSION:-}
+      secrets:
+        - github_token
     ports:
       - "127.0.0.1:8080-8089:8080" # Spring Boot default dev server
       - "127.0.0.1:5005-5014:5005" # JDWP default debug port
     volumes:
       - ~/.m2:/home/ubuntu/.m2
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

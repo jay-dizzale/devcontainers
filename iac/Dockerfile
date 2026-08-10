@@ -6,7 +6,7 @@ LABEL description="Development environment for ARM architecture with tools for T
 ADD ./common/lib/ /usr/local/lib/shell/
 ADD ./common/scripts/ /tmp/
 WORKDIR /tmp
-RUN sh /tmp/install-common.sh
+RUN --mount=type=secret,id=github_token sh /tmp/install-common.sh
 ARG INSTALL_CLAUDE=0
 RUN [ "${INSTALL_CLAUDE}" = "1" ] && sh /tmp/install-claude.sh || true
 
@@ -33,7 +33,7 @@ RUN sh /tmp/install-spacectl.sh
 
 ## Install `java` (Amazon Corretto) — always resolves latest LTS
 ADD ../java/scripts/ /tmp/
-RUN sh /tmp/install-java.sh
+RUN --mount=type=secret,id=github_token sh /tmp/install-java.sh
 
 ## Install Kafka + MSK IAM Auth
 RUN sh /tmp/install-kafka.sh
