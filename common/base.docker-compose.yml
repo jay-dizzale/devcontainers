@@ -21,4 +21,5 @@ services:
       # Claude Code writes session/auth state back to these — must stay RW.
       - ~/.claude:/home/ubuntu/.claude
       - ~/.claude.json:/home/ubuntu/.claude.json
+      - ~/.copilot:/home/ubuntu/.copilot
     command: ["sleep", "infinity"]
