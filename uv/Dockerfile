@@ -11,7 +11,7 @@ RUN --mount=type=secret,id=github_token AGENTS="${AGENTS}" sh /tmp/agents/instal
 
 ## Install `uv` to manage python versions and venv
 ADD uv/scripts/ /tmp/
-RUN sh /tmp/install-uv.sh
+RUN --mount=type=secret,id=github_token sh /tmp/install-uv.sh
 
 ## Cleanup
 RUN rm -rf /tmp/*

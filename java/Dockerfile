@@ -15,7 +15,7 @@ ARG JAVA_VERSION=
 RUN --mount=type=secret,id=github_token sh /tmp/install-java.sh
 
 # Install Maven
-RUN sh /tmp/install-maven.sh
+RUN --mount=type=secret,id=github_token sh /tmp/install-maven.sh
 ENV PATH=/opt/maven/bin:$PATH
 
 ## Cleanup

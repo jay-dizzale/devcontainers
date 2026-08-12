@@ -14,13 +14,13 @@ RUN --mount=type=secret,id=github_token AGENTS="${AGENTS}" sh /tmp/agents/instal
 ADD ./opentofu/scripts/ /tmp/
 
 ## Install `tenv` to manage multiple versions of Terraform / OpenTofu
-RUN sh /tmp/install-tenv.sh
+RUN --mount=type=secret,id=github_token sh /tmp/install-tenv.sh
 
 ## Install `terraform-docs`
-RUN sh /tmp/install-terraform-docs.sh
+RUN --mount=type=secret,id=github_token sh /tmp/install-terraform-docs.sh
 
 ## Install `tflint`
-RUN sh /tmp/install-tflint.sh
+RUN --mount=type=secret,id=github_token sh /tmp/install-tflint.sh
 
 ## Cleanup
 RUN rm -rf /tmp/* 
