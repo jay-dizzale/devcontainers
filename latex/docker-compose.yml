@@ -7,7 +7,7 @@ services:
       context: ..
       dockerfile: latex/Dockerfile
       args:
-        INSTALL_CLAUDE: ${INSTALL_CLAUDE:-1}
+        AGENTS: ${AGENTS:-}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}

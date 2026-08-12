@@ -40,8 +40,6 @@ Everything in `common/` is shared by all environments (`common/base.docker-compo
   needed to build languages from source.
 - **`gh`** — GitHub CLI.
 - **`tea`** — Gitea CLI.
-- **Claude Code** — installed from a GPG-signature-verified, pinned release
-  (`common/scripts/install-claude.sh`), so AI assistance is available out of the box.
 - **A preconfigured `zsh`** — history, git config, prompt and a `gitpush` helper
   (`common/.zshrc`). Drop a `.zshrc2` into an environment to extend it.
 
@@ -49,6 +47,27 @@ The base also mounts useful host config **read-only** into the container
 (`~/.config/gh`, `~/.config/tea/config.yml`) and your **workspace** at `/workspace`.
 `~/.claude` and `~/.claude.json` are mounted **read-write** so Claude Code can persist
 its session/auth state.
+
+### Optional coding-agent CLIs
+
+None, one, or several agent CLIs can be installed on top of the base — pick them
+interactively when `run.sh` starts a stack for the first time:
+
+```
+🤖 Optional coding-agent CLIs:
+  [1] Claude Code
+  [2] GitHub Copilot CLI
+Select (comma-separated numbers, 'a' for all, ENTER for none):
+```
+
+Each is installed from a pinned, checksum/signature-verified release
+(`common/agents/install-claude.sh`, `common/agents/install-copilot.sh`). Your
+selection is forwarded as a single `AGENTS` build arg (e.g. `AGENTS=claude,copilot`),
+which `common/agents/install-agents.sh` dispatches to the matching install script.
+Skip the prompt non-interactively with `AGENTS=claude,copilot sh run.sh`.
+
+Adding a future agent needs no Dockerfile/docker-compose.yml changes — just a new
+`common/agents/install-<name>.sh` and an entry in `AGENTS_AVAILABLE` in `run.sh`.
 
 Pinned base versions live in `common/scripts/versions.env`.
 

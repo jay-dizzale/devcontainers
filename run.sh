@@ -110,6 +110,57 @@ pick_from_list() {
 }
 
 # ---------------------------------------------------------------------------
+# Optional coding-agent CLIs installed into the image. To add a new agent:
+#   1. Add an "id:Label" line here.
+#   2. Drop a common/scripts/install-<id>.sh (same conventions as the
+#      others: pinned version, checksum/signature verification).
+# No Dockerfile or docker-compose.yml changes are needed — both already
+# forward the AGENTS build arg generically to install-agents.sh.
+# ---------------------------------------------------------------------------
+AGENTS_AVAILABLE="claude:Claude Code
+copilot:GitHub Copilot CLI"
+
+# Prompts for zero, one, or many agents; prints a comma-separated list of
+# selected ids (e.g. "claude,copilot") to stdout.
+pick_agents() {
+    echo "🤖 Optional coding-agent CLIs:" >&2
+    _i=0
+    while IFS=: read -r _id _label; do
+        [ -n "$_id" ] || continue
+        _i=$((_i + 1))
+        printf "  [%s] %s\n" "$_i" "$_label" >&2
+        eval "_agent_id_${_i}=\$_id"
+    done <<EOF
+$AGENTS_AVAILABLE
+EOF
+    printf "Select (comma-separated numbers, 'a' for all, ENTER for none): " >&2
+    read -r _choice
+    [ -n "$_choice" ] || return 0
+
+    if [ "$_choice" = "a" ] || [ "$_choice" = "A" ]; then
+        echo "$AGENTS_AVAILABLE" | awk -F: '{print $1}' | tr '\n' ',' | sed 's/,$//'
+        return 0
+    fi
+
+    _result=""
+    _old_ifs="$IFS"
+    IFS=','
+    for _n in $_choice; do
+        IFS="$_old_ifs"
+        _n="$(echo "$_n" | tr -d '[:space:]')"
+        [ -n "$_n" ] || continue
+        eval "_sel=\${_agent_id_${_n}:-}"
+        if [ -n "$_sel" ]; then
+            _result="${_result:+${_result},}${_sel}"
+        else
+            echo "⚠️  Ignoring invalid selection: $_n" >&2
+        fi
+    done
+    IFS="$_old_ifs"
+    printf '%s' "$_result"
+}
+
+# ---------------------------------------------------------------------------
 # Discover compose files (max depth 2, deduplicated)
 # ---------------------------------------------------------------------------
 COMPOSE_DIRS="$(
@@ -185,12 +236,12 @@ else
             ;;
     esac
 
-    printf "Install Claude Code? [y/N]: "
-    read -r claude_choice
-    case "$claude_choice" in
-        y|Y|yes|YES) export INSTALL_CLAUDE=1 ;;
-        *)            export INSTALL_CLAUDE=0 ;;
-    esac
+    if [ -z "${AGENTS:-}" ]; then
+        AGENTS="$(pick_agents)"
+    else
+        echo "🤖 Using pre-set AGENTS=${AGENTS}"
+    fi
+    export AGENTS
     _up_build="--build"
     [ "$REBUILD" = "1" ] && _up_build=""
     # shellcheck disable=SC2086

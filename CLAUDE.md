@@ -24,12 +24,15 @@ image and confirming the tooling installs work (see Commands below).
 │   ├── base.docker-compose.yml   # Base compose service (mounts, env, user) that others `extend`
 │   ├── .zshrc                    # Shared shell config (history, git config, prompt, gitpush)
 │   ├── lib/download-utils.sh     # Shared shell helpers: download_file, download_and_verify, load_env
-│   └── scripts/
-│       ├── install-common.sh     # apt base packages + gh + tea + Claude Code
-│       ├── install-gh.sh         # GitHub CLI
-│       ├── install-tea.sh        # Gitea CLI
-│       ├── install-claude.sh     # Claude Code (GPG-signature-verified, pinned)
-│       └── versions.env          # Pinned versions for the base tools
+│   ├── scripts/
+│   │   ├── install-common.sh     # apt base packages + gh + tea + trivy
+│   │   ├── install-gh.sh         # GitHub CLI
+│   │   ├── install-tea.sh        # Gitea CLI
+│   │   └── versions.env          # Pinned versions for the base tools
+│   └── agents/                   # Optional coding-agent CLIs (see below)
+│       ├── install-agents.sh     # Dispatches the AGENTS build arg to install-<name>.sh below
+│       ├── install-claude.sh     # Claude Code CLI (agent "claude", GPG-signature-verified, pinned)
+│       └── install-copilot.sh    # GitHub Copilot CLI (agent "copilot", checksum-verified, pinned)
 └── <env>/                        # One folder per environment, each with:
     ├── Dockerfile                # FROM ubuntu:noble; runs install-common.sh then env scripts
     ├── docker-compose.yml        # `extends` common base; pins tool versions via build args
@@ -57,6 +60,15 @@ image and confirming the tooling installs work (see Commands below).
   and `~/.claude.json` are mounted **read-write** so Claude Code can persist session/auth
   state. Never bake host secrets (`~/.aws`, `~/.azure`, `~/.terraform.d`, `~/.spacelift`,
   `~/.m2`, gh/tea config, `~/.claude*`) into images — they're runtime volume mounts only.
+- **Optional coding-agent CLIs** are selected at `run.sh` time (none/one/many), not
+  hardcoded per environment. `run.sh` prompts from `AGENTS_AVAILABLE` (an `id:Label`
+  list) and exports a single `AGENTS` build arg (e.g. `AGENTS=claude,copilot`,
+  respected non-interactively too). Every Dockerfile `ADD`s `common/agents/` to
+  `/tmp/agents/` (separate from `common/scripts/` → `/tmp/`) and forwards the arg via
+  `RUN --mount=type=secret,id=github_token AGENTS="${AGENTS}" sh /tmp/agents/install-agents.sh`,
+  which dispatches each selected id to `common/agents/install-<id>.sh`. **To add a new
+  agent: add one `install-<id>.sh` script in `common/agents/` + one `AGENTS_AVAILABLE`
+  line in `run.sh` — no Dockerfile or docker-compose.yml changes needed.**
 
 ## Commands
 

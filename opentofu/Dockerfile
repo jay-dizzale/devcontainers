@@ -5,10 +5,11 @@ LABEL description="Development environment for ARM architecture with tools for O
 ## Install common tools
 ADD ./common/lib/ /usr/local/lib/shell/
 ADD ./common/scripts/ /tmp/
+ADD ./common/agents/ /tmp/agents/
 WORKDIR /tmp
 RUN --mount=type=secret,id=github_token sh /tmp/install-common.sh
-ARG INSTALL_CLAUDE=0
-RUN [ "${INSTALL_CLAUDE}" = "1" ] && sh /tmp/install-claude.sh || true
+ARG AGENTS=
+RUN --mount=type=secret,id=github_token AGENTS="${AGENTS}" sh /tmp/agents/install-agents.sh
 
 ADD ./opentofu/scripts/ /tmp/
 
