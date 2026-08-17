@@ -14,19 +14,24 @@ Every environment builds on the **common base** (see below) and adds its own too
 
 | Environment | Focus | Tools installed on top of the base |
 |-------------|-------|------------------------------------|
-| `csharp`    | .NET development | .NET SDK `10.0.105`, .NET Runtime `10.0.5` |
-| `gcc`       | Raspberry Pi Pico / RP2040 firmware | `arm-none-eabi` GCC toolchain, `pico-sdk` `2.2.0`, `pico-extras`, `pico-examples` |
-| `go`        | Go development | Go `1.24.2` |
-| `iac`       | Infrastructure-as-Code on AWS & Azure | `tenv` (Terraform/OpenTofu), `terraform-docs`, `tflint`, AWS CLI, AWS SSM plugin, Azure CLI, `spacectl` (Spacelift), Amazon Corretto JDK `21`, Kafka + MSK IAM auth, Go, `uv`, Node.js `22` |
-| `java`      | Java development | Amazon Corretto JDK `25`, Apache Maven `3.9.11` |
+| `csharp`    | .NET development | .NET SDK, .NET Runtime |
+| `gcc`       | Raspberry Pi Pico / RP2040 firmware | `arm-none-eabi` GCC toolchain, `pico-sdk`, `pico-extras`, `pico-examples` |
+| `go`        | Go development | Go |
+| `iac`       | Infrastructure-as-Code on AWS & Azure | `tenv` (Terraform/OpenTofu), `terraform-docs`, `tflint`, AWS CLI, AWS SSM plugin, Azure CLI, `spacectl` (Spacelift), Amazon Corretto JDK, Kafka + MSK IAM auth, Go, `uv`, Node.js |
+| `java`      | Java development | Amazon Corretto JDK, Apache Maven |
 | `latex`     | Document authoring | `texlive-full` (with Perl/Tk GUI support) |
 | `opentofu`  | OpenTofu / Terraform | `tenv`, `terraform-docs`, `tflint` |
-| `ruby`      | Ruby development | Ruby `4.0.2` (built from source) |
-| `rust`      | Rust development | `rustup` + Rust toolchain `1.87.0`, `build-essential` |
-| `uv`        | Python development | `uv` `0.6.14` (Python version & venv manager) |
-| `web`       | Web / Node.js development | Node.js `22` (incl. npm) |
+| `ruby`      | Ruby development | Ruby (built from source) |
+| `rust`      | Rust development | `rustup` + Rust toolchain, `build-essential` |
+| `uv`        | Python development | `uv` (Python version & venv manager) |
+| `web`       | Web / Node.js development | Node.js (incl. npm) |
 
-> Tool versions are pinned in each environment's `docker-compose.yml` (build `args`).
+> By default every tool resolves the **latest stable release** at build time (see
+> `common/scripts/versions.env`) — nothing above is pinned to a fixed version number.
+> To pin one, pass its `<TOOL>_VERSION` build arg in that environment's
+> `docker-compose.yml` (e.g. `JAVA_VERSION`, `RUST_VERSION`); each install script
+> accepts it as `$1`/env-var fallback. Not every tool has that arg wired through yet —
+> check the env's `docker-compose.yml` before assuming one is reachable.
 > The `iac` environment is the "kitchen sink" — it composes many of the others into a
 > single image for platform/DevOps work.
 
@@ -48,26 +53,15 @@ The base also mounts useful host config **read-only** into the container
 `~/.claude` and `~/.claude.json` are mounted **read-write** so Claude Code can persist
 its session/auth state.
 
-### Optional coding-agent CLIs
+### Coding-agent CLIs
 
-None, one, or several agent CLIs can be installed on top of the base — pick them
-interactively when `run.sh` starts a stack for the first time:
-
-```
-🤖 Optional coding-agent CLIs:
-  [1] Claude Code
-  [2] GitHub Copilot CLI
-Select (comma-separated numbers, 'a' for all, ENTER for none):
-```
-
-Each is installed from a pinned, checksum/signature-verified release
-(`common/agents/install-claude.sh`, `common/agents/install-copilot.sh`). Your
-selection is forwarded as a single `AGENTS` build arg (e.g. `AGENTS=claude,copilot`),
-which `common/agents/install-agents.sh` dispatches to the matching install script.
-Skip the prompt non-interactively with `AGENTS=claude,copilot sh run.sh`.
+**Claude Code** and **GitHub Copilot CLI** are installed on every image, each from a
+pinned, checksum/signature-verified release (`common/agents/install-claude.sh`,
+`common/agents/install-copilot.sh`), dispatched by `common/agents/install-agents.sh`.
 
 Adding a future agent needs no Dockerfile/docker-compose.yml changes — just a new
-`common/agents/install-<name>.sh` and an entry in `AGENTS_AVAILABLE` in `run.sh`.
+`common/agents/install-<name>.sh` and its id added to `DEFAULT_AGENTS` in
+`common/agents/install-agents.sh`.
 
 Pinned base versions live in `common/scripts/versions.env`.
 

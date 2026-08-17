@@ -7,7 +7,7 @@ services:
       context: ..
       dockerfile: ./rust/Dockerfile
       args:
-        AGENTS: ${AGENTS:-}
+        RUST_VERSION: ${RUST_VERSION:-stable}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}

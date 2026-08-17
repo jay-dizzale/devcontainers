@@ -30,7 +30,7 @@ image and confirming the tooling installs work (see Commands below).
 │   │   ├── install-tea.sh        # Gitea CLI
 │   │   └── versions.env          # Pinned versions for the base tools
 │   └── agents/                   # Optional coding-agent CLIs (see below)
-│       ├── install-agents.sh     # Dispatches the AGENTS build arg to install-<name>.sh below
+│       ├── install-agents.sh     # Installs DEFAULT_AGENTS by dispatching to install-<name>.sh below
 │       ├── install-claude.sh     # Claude Code CLI (agent "claude", GPG-signature-verified, pinned)
 │       └── install-copilot.sh    # GitHub Copilot CLI (agent "copilot", checksum-verified, pinned)
 └── <env>/                        # One folder per environment, each with:
@@ -56,19 +56,19 @@ image and confirming the tooling installs work (see Commands below).
   `run.sh` sets to the directory it was invoked from (or `-v <path>`). The compose
   project name is derived as `<env>_<parent-dir>_<current-dir>` so the same host
   directory always reconnects to the same stack.
-- `~/.config/gh`, `~/.config/tea/config.yml` are mounted **read-only**; `~/.claude`
-  and `~/.claude.json` are mounted **read-write** so Claude Code can persist session/auth
-  state. Never bake host secrets (`~/.aws`, `~/.azure`, `~/.terraform.d`, `~/.spacelift`,
-  `~/.m2`, gh/tea config, `~/.claude*`) into images — they're runtime volume mounts only.
-- **Optional coding-agent CLIs** are selected at `run.sh` time (none/one/many), not
-  hardcoded per environment. `run.sh` prompts from `AGENTS_AVAILABLE` (an `id:Label`
-  list) and exports a single `AGENTS` build arg (e.g. `AGENTS=claude,copilot`,
-  respected non-interactively too). Every Dockerfile `ADD`s `common/agents/` to
-  `/tmp/agents/` (separate from `common/scripts/` → `/tmp/`) and forwards the arg via
-  `RUN --mount=type=secret,id=github_token AGENTS="${AGENTS}" sh /tmp/agents/install-agents.sh`,
-  which dispatches each selected id to `common/agents/install-<id>.sh`. **To add a new
-  agent: add one `install-<id>.sh` script in `common/agents/` + one `AGENTS_AVAILABLE`
-  line in `run.sh` — no Dockerfile or docker-compose.yml changes needed.**
+- `~/.config/gh`, `~/.config/tea/config.yml` are mounted **read-only**; `~/.claude`,
+  `~/.claude.json`, and `~/.copilot` are mounted **read-write** so the agent CLIs can
+  persist session/auth state. Never bake host secrets (`~/.aws`, `~/.azure`,
+  `~/.terraform.d`, `~/.spacelift`, `~/.m2`, gh/tea config, `~/.claude*`, `~/.copilot`)
+  into images — they're runtime volume mounts only.
+- **Coding-agent CLIs** (Claude Code, GitHub Copilot CLI) are installed unconditionally
+  on every image — no build-time selection. Every Dockerfile `ADD`s `common/agents/` to
+  `/tmp/agents/` (separate from `common/scripts/` → `/tmp/`) and runs
+  `RUN --mount=type=secret,id=github_token sh /tmp/agents/install-agents.sh`, which
+  installs each id in `DEFAULT_AGENTS` (in `common/agents/install-agents.sh`) by
+  dispatching to `common/agents/install-<id>.sh`. **To add a new agent: add one
+  `install-<id>.sh` script in `common/agents/` + its id to `DEFAULT_AGENTS` — no
+  Dockerfile or docker-compose.yml changes needed.**
 
 ## Commands
 
@@ -104,8 +104,13 @@ relevant, checking the `iac` build still succeeds since it reuses other envs' sc
   env-var fallback, and **verify downloads** — reuse `download_and_verify` /
   `download_file` from `common/lib/download-utils.sh` and check GPG signatures or
   SHA256/SHA512 checksums against upstream. Do not add unverified `curl | sh` installs.
-- **Pin every version.** New tools get a build `arg` in the env's `docker-compose.yml`
-  (or an entry in `common/scripts/versions.env` for base tools). No `latest` tags.
+- **Versions default to "latest stable" at build time** (see `common/scripts/versions.env`)
+  — every install script resolves the newest release via its vendor's API/index when no
+  version is given. To pin a version instead, wire a `<TOOL>_VERSION` build `arg` through
+  the env's `docker-compose.yml` (see `JAVA_VERSION` in `java/docker-compose.yml` for the
+  pattern) so `docker compose build` can override it; the install script already accepts
+  it as `$1`/env-var fallback. Not every env currently has this wired for every tool it
+  installs — check before assuming a given `*_VERSION` is actually reachable via compose.
 - **Match the surrounding style** — comment headers on scripts, the existing section
   banners in Dockerfiles, two-space YAML indentation.
 

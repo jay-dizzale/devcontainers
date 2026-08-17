@@ -8,8 +8,7 @@ ADD ./common/scripts/ /tmp/
 ADD ./common/agents/ /tmp/agents/
 WORKDIR /tmp
 RUN --mount=type=secret,id=github_token sh /tmp/install-common.sh
-ARG AGENTS=
-RUN --mount=type=secret,id=github_token AGENTS="${AGENTS}" sh /tmp/agents/install-agents.sh
+RUN --mount=type=secret,id=github_token sh /tmp/agents/install-agents.sh
 
 ADD ./iac/scripts/ /tmp/
 ADD ../opentofu/scripts/ /tmp/
