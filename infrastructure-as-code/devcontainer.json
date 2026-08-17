@@ -1,10 +1,10 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/ubuntu
 {
-	"name": "uv",
+	"name": "infrastructure-as-code",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"dockerComposeFile": "docker-compose.yml",
-	"service": "uv",
+	"service": "infrastructure-as-code",
 	"workspaceFolder": "/workspace",
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
@@ -21,7 +21,9 @@
 			},
 			// Add the IDs of extensions you want installed when the container is created.
 			"extensions": [
-
+				"opentofu.vscode-opentofu",
+				"redhat.vscode-yaml",
+				"ExodiusStudios.comment-anchors"
 			]
 		}
 	},

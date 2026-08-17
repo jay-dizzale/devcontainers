@@ -8,12 +8,9 @@ WORKDIR /tmp
 RUN --mount=type=secret,id=github_token sh /tmp/install-common.sh
 RUN --mount=type=secret,id=github_token sh /tmp/agents/install-agents.sh
 
-## Install PICO toolchain to compile for RP2040
-ADD ./gcc/scripts /tmp/
-RUN --mount=type=secret,id=github_token sh /tmp/install-pico-toolchain.sh
-ENV PICO_SDK_PATH=/opt/pico/pico-sdk \
-    PICO_EXTRAS_PATH=/opt/pico/pico-extras \
-    PICO_EXAMPLES_PATH=/opt/pico/pico-examples
+## Install `uv` to manage python versions and venv
+ADD python-with-uv/scripts/ /tmp/
+RUN --mount=type=secret,id=github_token sh /tmp/install-uv.sh
 
 ## Cleanup
 RUN rm -rf /tmp/*

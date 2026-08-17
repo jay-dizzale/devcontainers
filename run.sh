@@ -191,6 +191,9 @@ else
     docker compose up -d $_up_build || die "Failed to start stack."
 fi
 
+echo "ℹ️  The stack keeps running after you exit the shell — it is not stopped or deleted automatically."
+echo "   Run 'sh run.sh stop' (or 'dev stop') to stop & delete it."
+
 cleanup() {
     echo
     echo "🛑 Stopping stack …"
@@ -224,16 +227,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Exit strategy
-# ---------------------------------------------------------------------------
-printf "On shell exit — [y/yes/down] bring stack down  [ENTER] keep running (default): "
-read -r stop_choice
-case "$stop_choice" in
-  y|Y|yes|YES|down|DOWN) trap cleanup EXIT ;;
-esac
-
-# ---------------------------------------------------------------------------
 # Open shell
 # ---------------------------------------------------------------------------
 echo "🚀 Opening zsh in service '${SERVICE}' …"
 docker compose exec -ti "$SERVICE" zsh
+
+echo
+echo "👋 Shell exited — the stack is still running."
+echo "   Run 'sh run.sh stop' (or 'dev stop') to stop & delete it."

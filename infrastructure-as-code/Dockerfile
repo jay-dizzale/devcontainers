@@ -10,8 +10,7 @@ WORKDIR /tmp
 RUN --mount=type=secret,id=github_token sh /tmp/install-common.sh
 RUN --mount=type=secret,id=github_token sh /tmp/agents/install-agents.sh
 
-ADD ./iac/scripts/ /tmp/
-ADD ../opentofu/scripts/ /tmp/
+ADD ./infrastructure-as-code/scripts/ /tmp/
 
 ## Install `tenv` to manage multiple versions of Terraform / OpenTofu
 RUN --mount=type=secret,id=github_token sh /tmp/install-tenv.sh
@@ -44,7 +43,7 @@ RUN sh /tmp/install-go.sh
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 ## Install `uv` to manage python versions and venv
-ADD ../uv/scripts/ /tmp/
+ADD ../python-with-uv/scripts/ /tmp/
 RUN --mount=type=secret,id=github_token sh /tmp/install-uv.sh
 
 ## Install `node` (include NPM)

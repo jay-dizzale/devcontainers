@@ -1,8 +1,8 @@
 services:
-  opentofu:
+  infrastructure-as-code:
     build:
       context: ..
-      dockerfile: opentofu/Dockerfile
+      dockerfile: infrastructure-as-code/Dockerfile
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -15,8 +15,13 @@ services:
     extends:
       file: ../common/base.docker-compose.yml
       service: base
+    network_mode: host
     volumes:
       - ./.zshrc2:/home/ubuntu/.zshrc2
+      - ~/.aws/:/home/ubuntu/.aws
+      - ~/.azure:/home/ubuntu/.azure
+      - ~/.terraform.d:/home/ubuntu/.terraform.d
+      - ~/.spacelift:/home/ubuntu/.spacelift
 
 secrets:
   github_token:

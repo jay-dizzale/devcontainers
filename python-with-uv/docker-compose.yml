@@ -1,8 +1,8 @@
 services:
-  gcc:
+  python-with-uv:
     build:
       context: ..
-      dockerfile: ./gcc/Dockerfile
+      dockerfile: ./python-with-uv/Dockerfile
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -15,6 +15,10 @@ services:
     extends:
       file: ../common/base.docker-compose.yml
       service: base
+    ports:
+      - "127.0.0.1:8010-8019:8000" # Django default dev server
+    volumes:
+      - ./.zshrc2:/home/ubuntu/.zshrc2
 
 secrets:
   github_token:

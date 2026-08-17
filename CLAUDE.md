@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repository is
 
 A **collection of DevContainer environments**, not an application. Each top-level
-folder (`csharp/`, `gcc/`, `go/`, `iac/`, `java/`, `latex/`, `opentofu/`, `ruby/`,
-`rust/`, `uv/`, `web/`) is one containerized development environment. All of them
+folder (`csharp/`, `go/`, `infrastructure-as-code/`, `java/`, `latex/`, `pico-development/`,
+`python-with-uv/`, `ruby/`, `rust/`, `web/`) is one containerized development environment. All of them
 layer on a shared base defined in `common/`. The goal is reproducible, pinned
 toolchains that developers launch via `run.sh` or VS Code Dev Containers.
 
@@ -48,10 +48,12 @@ image and confirming the tooling installs work (see Commands below).
   from both `common/` and the env folder. Keep that in mind when adding `ADD`/`COPY` paths.
 - Dockerfiles always run `common/scripts/install-common.sh` first, then env-specific
   `install-*.sh` scripts, then `rm -rf /tmp/*`.
-- The `iac` environment intentionally reuses install scripts from **other** env folders
-  (`../go/scripts`, `../uv/scripts`, `../web/scripts`, `../java/scripts`, `../opentofu/scripts`).
-  It is the "kitchen sink" that composes many of the others into one image. If you change
-  one of those scripts, check the impact on `iac` too.
+- The `infrastructure-as-code` environment intentionally reuses install scripts from **other** env folders
+  (`../go/scripts`, `../python-with-uv/scripts`, `../web/scripts`, `../java/scripts`), and owns
+  `install-tenv.sh`/`install-terraform-docs.sh`/`install-tflint.sh` directly (there is
+  no standalone OpenTofu env — it was merged into `infrastructure-as-code`). It is the "kitchen sink" that
+  composes many of the others into one image. If you change one of those scripts, check
+  the impact on `infrastructure-as-code` too.
 - The container's mounted workspace (`/workspace`) is bound to `${VOLUME}`, which
   `run.sh` sets to the directory it was invoked from (or `-v <path>`). The compose
   project name is derived as `<env>_<parent-dir>_<current-dir>` so the same host
@@ -94,7 +96,7 @@ docker compose down -v               # tear down
 
 There are no linters or test suites to run; validate changes by building the affected
 environment's image (`docker compose build` in that env's directory) and, where
-relevant, checking the `iac` build still succeeds since it reuses other envs' scripts.
+relevant, checking the `infrastructure-as-code` build still succeeds since it reuses other envs' scripts.
 
 ## Conventions to follow
 
