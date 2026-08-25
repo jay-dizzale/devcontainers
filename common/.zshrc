@@ -39,6 +39,25 @@ git config --global color.grep auto
 git config --global --add safe.directory '*'
 git config --global --add --bool push.autoSetupRemote true
 
+# Wire up gh's credential helper so `git push`/`git clone` over HTTPS work
+# without a separate login — only if gh is installed and already authenticated.
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  gh auth setup-git >/dev/null 2>&1
+fi
+
+# Same idea for tea (Gitea CLI) — only if tea is installed and already logged in.
+if command -v tea >/dev/null 2>&1 && tea whoami >/dev/null 2>&1; then
+  tea login helper setup >/dev/null 2>&1
+fi
+
+# AWS CLI ignores the system CA trust store by default — if install-common.sh
+# baked a custom CA (SSL-inspecting proxy) into it, point AWS CLI at the
+# combined bundle so it trusts that cert too. Only if a custom cert was
+# actually installed and the AWS CLI is present.
+if command -v aws >/dev/null 2>&1 && ls /usr/local/share/ca-certificates/*.crt >/dev/null 2>&1; then
+  export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+fi
+
 export PATH="$HOME/.local/bin:$PATH"
 
 [ -t 1 ] && motd
