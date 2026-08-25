@@ -110,22 +110,22 @@ pick_from_list() {
 }
 
 pick_environment() {
-    echo "🍱 Kitchen-sink environments:" >&2
+    echo "🧰 Toolbelt environments:" >&2
     i=1
     for item in $COMPOSE_NAMES; do
         case "$item" in
-            kitchen-sink-*)
+            toolbelt-*)
                 printf "  [%s] %s\n" "$i" "$item" >&2
                 ;;
         esac
         i=$((i + 1))
     done
 
-    echo "🧰 Specific development environments:" >&2
+    echo "🎯 Specific development environments:" >&2
     i=1
     for item in $COMPOSE_NAMES; do
         case "$item" in
-            kitchen-sink-*) ;;
+            toolbelt-*) ;;
             *) printf "  [%s] %s\n" "$i" "$item" >&2 ;;
         esac
         i=$((i + 1))
@@ -137,16 +137,16 @@ pick_environment() {
 }
 
 # ---------------------------------------------------------------------------
-# Discover compose files (max depth 2, deduplicated). Kitchen sinks sort first.
+# Discover compose files (max depth 2, deduplicated). Toolbelts sort first.
 # ---------------------------------------------------------------------------
 COMPOSE_DIRS="$(
     find -L "$SCRIPT_DIR" -maxdepth 2 -type f \( -name docker-compose.yml -o -name docker-compose.yaml \) \
     | xargs -I{} dirname {} \
     | sort -u \
     | awk '
-        /\/kitchen-sink-software$/       { print "1|" $0; next }
-        /\/kitchen-sink-infrastructure$/ { print "2|" $0; next }
-                                        { print "3|" $0 }
+        /\/toolbelt-software$/       { print "1|" $0; next }
+        /\/toolbelt-infrastructure$/ { print "2|" $0; next }
+                                    { print "3|" $0 }
       ' \
     | sort -t'|' -k1,1n -k2,2 \
     | cut -d'|' -f2-
@@ -204,7 +204,7 @@ if [ -n "$(docker compose ps --status running -q 2>/dev/null || true)" ]; then
     echo "♻️  Stack already running — connecting to the existing container."
 else
     case "$(basename "$COMPOSE_DIR")" in
-        java|kitchen-sink-software)
+        java|toolbelt-software)
             printf "☕ Java major version:\n" >&2
             printf "  [1] 8\n  [2] 11\n  [3] 17\n  [4] 21\n  [5] 25\n" >&2
             printf "Select [ENTER for latest LTS]: "

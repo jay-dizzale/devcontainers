@@ -1,6 +1,6 @@
 FROM ubuntu:noble
 
-LABEL description="Kitchen-sink environment for infrastructure development"
+LABEL description="Toolbelt environment for infrastructure development"
 
 ## Install common tools
 ADD ./common/lib/ /usr/local/lib/shell/
@@ -10,7 +10,7 @@ WORKDIR /tmp
 RUN --mount=type=secret,id=github_token sh /tmp/install-common.sh
 RUN --mount=type=secret,id=github_token sh /tmp/agents/install-agents.sh
 
-ADD ./kitchen-sink-infrastructure/scripts/ /tmp/
+ADD ./toolbelt-infrastructure/scripts/ /tmp/
 
 ## Install `tenv` to manage multiple versions of Terraform / OpenTofu
 RUN --mount=type=secret,id=github_token sh /tmp/install-tenv.sh

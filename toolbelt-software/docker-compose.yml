@@ -1,11 +1,11 @@
 services:
-  kitchen-sink-software:
+  toolbelt-software:
     extends:
       file: ../common/base.docker-compose.yml
       service: base
     build:
       context: ..
-      dockerfile: kitchen-sink-software/Dockerfile
+      dockerfile: toolbelt-software/Dockerfile
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}

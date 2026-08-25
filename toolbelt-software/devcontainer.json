@@ -1,7 +1,7 @@
 {
-  "name": "kitchen-sink-software",
+  "name": "toolbelt-software",
   "dockerComposeFile": "docker-compose.yml",
-  "service": "kitchen-sink-software",
+  "service": "toolbelt-software",
   "workspaceFolder": "/workspace",
   "customizations": {
     "vscode": {

@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repository is
 
 A **collection of DevContainer environments**, not an application. Each top-level
-folder (`csharp/`, `go/`, `kitchen-sink-infrastructure/`, `kitchen-sink-software/`, `java/`, `latex/`, `pico-development/`,
+folder (`csharp/`, `go/`, `toolbelt-infrastructure/`, `toolbelt-software/`, `java/`, `latex/`, `pico-development/`,
 `python-with-uv/`, `ruby/`, `rust/`, `web/`) is one containerized development environment. All of them
 layer on a shared base defined in `common/`. The goal is reproducible, pinned
 toolchains that developers launch via `run.sh` or VS Code Dev Containers.
@@ -48,12 +48,12 @@ image and confirming the tooling installs work (see Commands below).
   from both `common/` and the env folder. Keep that in mind when adding `ADD`/`COPY` paths.
 - Dockerfiles always run `common/scripts/install-common.sh` first, then env-specific
   `install-*.sh` scripts, then `rm -rf /tmp/*`.
-- The kitchen-sink environments intentionally reuse install scripts from **other** env folders.
-  `kitchen-sink-software` combines Java, `uv`, and Node.js.
-  `kitchen-sink-infrastructure` combines the infrastructure tools with Java, Go, `uv`, and Node.js,
+- The toolbelt environments intentionally reuse install scripts from **other** env folders.
+  `toolbelt-software` combines Java, `uv`, and Node.js.
+  `toolbelt-infrastructure` combines the infrastructure tools with Java, Go, `uv`, and Node.js,
   and owns `install-tenv.sh`/`install-terraform-docs.sh`/`install-tflint.sh` directly.
   There is no standalone OpenTofu environment. If you change a shared installer, check the impact
-  on both kitchen sinks as applicable.
+  on both toolbelts as applicable.
 - The container's mounted workspace (`/workspace`) is bound to `${VOLUME}`, which
   `run.sh` sets to the directory it was invoked from (or `-v <path>`). The compose
   project name is derived as `<env>_<parent-dir>_<current-dir>` so the same host
@@ -96,7 +96,7 @@ docker compose down -v               # tear down
 
 There are no linters or test suites to run; validate changes by building the affected
 environment's image (`docker compose build` in that env's directory) and, where
-relevant, checking the affected kitchen-sink builds still succeed since they reuse other envs' scripts.
+relevant, checking the affected toolbelt builds still succeed since they reuse other envs' scripts.
 
 ## Conventions to follow
 

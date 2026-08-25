@@ -14,8 +14,8 @@ Every environment builds on the **common base** (see below) and adds its own too
 
 | Environment | Focus | Tools installed on top of the base |
 |-------------|-------|------------------------------------|
-| `kitchen-sink-software` | General software development | Amazon Corretto JDK, Apache Maven, `uv`, Node.js |
-| `kitchen-sink-infrastructure` | Infrastructure-as-Code on AWS & Azure | `tenv` (Terraform/OpenTofu), `terraform-docs`, `tflint`, AWS CLI, AWS SSM plugin, Azure CLI, `spacectl` (Spacelift), Amazon Corretto JDK, Kafka + MSK IAM auth, Go, `uv`, Node.js |
+| `toolbelt-software` | General software development | Amazon Corretto JDK, Apache Maven, `uv`, Node.js |
+| `toolbelt-infrastructure` | Infrastructure-as-Code on AWS & Azure | `tenv` (Terraform/OpenTofu), `terraform-docs`, `tflint`, AWS CLI, AWS SSM plugin, Azure CLI, `spacectl` (Spacelift), Amazon Corretto JDK, Kafka + MSK IAM auth, Go, `uv`, Node.js |
 | `csharp`    | .NET development | .NET SDK, .NET Runtime |
 | `pico-development` | Raspberry Pi Pico / RP2040 firmware | `arm-none-eabi` GCC toolchain, `pico-sdk`, `pico-extras`, `pico-examples` |
 | `go`        | Go development | Go |
@@ -32,8 +32,8 @@ Every environment builds on the **common base** (see below) and adds its own too
 > `docker-compose.yml` (e.g. `JAVA_VERSION`, `RUST_VERSION`); each install script
 > accepts it as `$1`/env-var fallback. Not every tool has that arg wired through yet —
 > check the env's `docker-compose.yml` before assuming one is reachable.
-> The launcher lists the two kitchen sinks first. `kitchen-sink-software` combines
-> Java, Python via `uv`, and Node.js. `kitchen-sink-infrastructure` covers
+> The launcher lists the two toolbelts first. `toolbelt-software` combines
+> Java, Python via `uv`, and Node.js. `toolbelt-infrastructure` covers
 > OpenTofu/Terraform, AWS/Azure, Kafka, Go, Python via `uv`, and Node.js.
 > The focused environments remain available below them.
 
@@ -89,7 +89,7 @@ sh run.sh -v /path/to/your/project
 ```
 
 You'll be prompted to:
-1. **Select a kitchen sink or focused environment** (e.g. `kitchen-sink-software`, `go`, `rust`…).
+1. **Select a toolbelt or focused environment** (e.g. `toolbelt-software`, `go`, `rust`…).
 2. **Select a service** (auto-selected when there's only one; enter `s` to keep the
    stack running without opening a shell).
 
@@ -111,7 +111,7 @@ anonymous volumes removed).
 
 ## Run it (VS Code / DevContainers)
 
-Open the environment's folder (e.g. `kitchen-sink-infrastructure/`) in VS Code and choose
+Open the environment's folder (e.g. `toolbelt-infrastructure/`) in VS Code and choose
 **"Reopen in Container"**. The environment's `devcontainer.json` handles the rest.
 
 ## Configure it
@@ -120,7 +120,7 @@ Open the environment's folder (e.g. `kitchen-sink-infrastructure/`) in VS Code a
   (or `common/scripts/versions.env` for base tools).
 - **Identity** — the git user is set in `common/.zshrc`; update it to your own
   name/email.
-- **Per-environment shell tweaks** — add a `.zshrc2` (already wired up for both kitchen sinks and `python-with-uv`).
+- **Per-environment shell tweaks** — add a `.zshrc2` (already wired up for both toolbelts and `python-with-uv`).
 - **Trim it down** — remove environment folders you don't need.
 - **GitHub API rate limit** — optional. Some install scripts fall back to the
   GitHub API to resolve "latest" versions, which is capped at 60 unauthenticated
@@ -143,6 +143,10 @@ docker compose down  # from the environment's directory, to remove the stack
 
 Working in this repo with an AI agent? See [`AGENTS.md`](AGENTS.md) for repository
 conventions, structure, and guardrails.
+
+## Security
+
+Found a vulnerability? See [`SECURITY.md`](SECURITY.md) for how to report it privately.
 
 ## License
 

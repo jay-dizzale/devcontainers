@@ -1,6 +1,6 @@
 FROM ubuntu:noble
 
-LABEL description="Kitchen-sink environment for software development"
+LABEL description="Toolbelt environment for software development"
 
 ## Install common tools
 ADD ./common/lib/ /usr/local/lib/shell/
