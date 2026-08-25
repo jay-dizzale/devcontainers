@@ -56,7 +56,9 @@ printf '  ██║  ██║█████╗  ██║   ██║\n'
 printf '  ██║  ██║██╔══╝  ╚██╗ ██╔╝\n'
 printf '  ██████╔╝███████╗ ╚████╔╝ \n'
 printf '  ╚═════╝ ╚══════╝  ╚═══╝  \n'
-printf "${_R}${_D}                  devcontainer${_R}\n\n"
+printf "${_R}${_D}                  devcontainer${_R}\n"
+[ -n "${DEVCONTAINER_TYPE:-}" ] && printf "${_D}                  %s${_R}\n" "${DEVCONTAINER_TYPE}"
+printf "${_D}                  by jay-dizzale${_R}\n\n"
 
 # ── launch all checks in background ──────────────────────────────────────────
 

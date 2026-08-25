@@ -1,5 +1,8 @@
 FROM ubuntu:noble
 
+LABEL org.opencontainers.image.authors="jay-dizzale"
+ENV DEVCONTAINER_TYPE=java
+
 ## Install common tools
 ADD ./common/lib/ /usr/local/lib/shell/
 ADD ./common/scripts/ /tmp/

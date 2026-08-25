@@ -1,5 +1,8 @@
 FROM ubuntu:noble
 
+LABEL org.opencontainers.image.authors="jay-dizzale"
+ENV DEVCONTAINER_TYPE=toolbelt-software
+
 LABEL description="Toolbelt environment for software development"
 
 ## Install common tools
