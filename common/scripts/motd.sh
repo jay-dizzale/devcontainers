@@ -106,7 +106,7 @@ if [ -d /opt/kafka/libs ]; then
     printf '%s\t%s\n' "kafka" "${_kv:-?}" > "$(printf '%s/%03d' "$_TMPDIR" $((_i+1)))"
 fi
 
-# ── wait for all jobs then print table in original order ──────────────────────
+# ── wait for all jobs then print table alphabetically ─────────────────────────
 
 wait
 
@@ -114,9 +114,7 @@ _hline '┌' '┬' '┐'
 printf " ${_D}│${_R} ${_B}%-${W1}s${_R} ${_D}│${_R} ${_B}%-${W2}s${_R} ${_D}│${_R}\n" "tool" "version"
 _hline '├' '┼' '┤'
 
-for _f in "$_TMPDIR"/[0-9]*; do
-    [ -f "$_f" ] || continue
-    IFS='	' read -r _n _v < "$_f"
+LC_ALL=C sort -t '	' -k1,1 "$_TMPDIR"/[0-9]* | while IFS='	' read -r _n _v; do
     _row "$_n" "$_v"
 done
 

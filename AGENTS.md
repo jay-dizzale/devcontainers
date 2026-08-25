@@ -6,7 +6,7 @@ This file gives AI coding agents (Claude Code, and any other agent that reads
 ## What this repository is
 
 A **collection of DevContainer environments**, not an application. Each top-level
-folder (`csharp/`, `go/`, `infrastructure-as-code/`, `java/`, `latex/`, `pico-development/`,
+folder (`csharp/`, `go/`, `kitchen-sink-infrastructure/`, `kitchen-sink-software/`, `java/`, `latex/`, `pico-development/`,
 `python-with-uv/`, `ruby/`, `rust/`, `web/`) is one containerized development environment. All of them
 layer on a shared base defined in `common/`. The goal is reproducible toolchains
 that developers launch via `run.sh` or VS Code Dev Containers.
@@ -50,11 +50,12 @@ images and the scripts that build them.
 - Dockerfiles always run `common/scripts/install-common.sh` first, then
   `common/agents/install-agents.sh`, then env-specific `install-*.sh` scripts, then
   `rm -rf /tmp/*`.
-- The `infrastructure-as-code` environment intentionally reuses install scripts from **other** env folders
-  (`../go/scripts`, `../python-with-uv/scripts`, `../web/scripts`, `../java/scripts`), and owns
-  `install-tenv.sh`/`install-terraform-docs.sh`/`install-tflint.sh` directly (there is
-  no standalone OpenTofu env — it was merged into `infrastructure-as-code`). If you change one of those
-  scripts, check the impact on `infrastructure-as-code` too.
+- The kitchen-sink environments intentionally reuse install scripts from **other** env folders.
+  `kitchen-sink-software` combines Java, `uv`, and Node.js.
+  `kitchen-sink-infrastructure` combines the infrastructure tools with Java, Go, `uv`, and Node.js,
+  and owns `install-tenv.sh`/`install-terraform-docs.sh`/`install-tflint.sh` directly.
+  There is no standalone OpenTofu environment. If you change a shared installer, check the impact
+  on both kitchen sinks as applicable.
 - `~/.config/gh`, `~/.config/tea/config.yml` are mounted **read-only**; `~/.claude`,
   `~/.claude.json`, and `~/.copilot` are mounted **read-write** so the agent CLIs can
   persist session/auth state.

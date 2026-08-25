@@ -1,8 +1,8 @@
 services:
-  infrastructure-as-code:
+  kitchen-sink-infrastructure:
     build:
       context: ..
-      dockerfile: infrastructure-as-code/Dockerfile
+      dockerfile: kitchen-sink-infrastructure/Dockerfile
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}

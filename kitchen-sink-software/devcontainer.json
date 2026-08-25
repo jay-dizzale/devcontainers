@@ -1,0 +1,23 @@
+{
+  "name": "kitchen-sink-software",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "kitchen-sink-software",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "editor.formatOnSave": true,
+        "files.insertFinalNewline": true,
+        "dev.containers.copyGitConfig": false
+      },
+      "extensions": [
+        "redhat.java",
+        "vscjava.vscode-java-pack",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  },
+  "remoteUser": "ubuntu"
+}

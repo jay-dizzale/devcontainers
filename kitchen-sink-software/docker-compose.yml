@@ -1,0 +1,31 @@
+services:
+  kitchen-sink-software:
+    extends:
+      file: ../common/base.docker-compose.yml
+      service: base
+    build:
+      context: ..
+      dockerfile: kitchen-sink-software/Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+        JAVA_VERSION: ${JAVA_VERSION:-}
+      secrets:
+        - github_token
+    ports:
+      - "127.0.0.1:3000-3009:3000"
+      - "127.0.0.1:5173-5182:5173"
+      - "127.0.0.1:8010-8019:8000"
+      - "127.0.0.1:8080-8089:8080"
+      - "127.0.0.1:5005-5014:5005"
+    volumes:
+      - ./.zshrc2:/home/ubuntu/.zshrc2:ro
+      - ~/.m2:/home/ubuntu/.m2
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

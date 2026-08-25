@@ -109,13 +109,47 @@ pick_from_list() {
     echo "$choice"
 }
 
+pick_environment() {
+    echo "🍱 Kitchen-sink environments:" >&2
+    i=1
+    for item in $COMPOSE_NAMES; do
+        case "$item" in
+            kitchen-sink-*)
+                printf "  [%s] %s\n" "$i" "$item" >&2
+                ;;
+        esac
+        i=$((i + 1))
+    done
+
+    echo "🧰 Specific development environments:" >&2
+    i=1
+    for item in $COMPOSE_NAMES; do
+        case "$item" in
+            kitchen-sink-*) ;;
+            *) printf "  [%s] %s\n" "$i" "$item" >&2 ;;
+        esac
+        i=$((i + 1))
+    done
+
+    printf "Select: " >&2
+    read -r choice
+    echo "$choice"
+}
+
 # ---------------------------------------------------------------------------
-# Discover compose files (max depth 2, deduplicated)
+# Discover compose files (max depth 2, deduplicated). Kitchen sinks sort first.
 # ---------------------------------------------------------------------------
 COMPOSE_DIRS="$(
     find -L "$SCRIPT_DIR" -maxdepth 2 -type f \( -name docker-compose.yml -o -name docker-compose.yaml \) \
     | xargs -I{} dirname {} \
-    | sort -u
+    | sort -u \
+    | awk '
+        /\/kitchen-sink-software$/       { print "1|" $0; next }
+        /\/kitchen-sink-infrastructure$/ { print "2|" $0; next }
+                                        { print "3|" $0 }
+      ' \
+    | sort -t'|' -k1,1n -k2,2 \
+    | cut -d'|' -f2-
 )"
 
 [ -n "$COMPOSE_DIRS" ] || die "No docker-compose files found."
@@ -129,7 +163,7 @@ COMPOSE_NAMES="$(
 )"
 
 # shellcheck disable=SC2086
-choice="$(pick_from_list "📦 Available environments" $COMPOSE_NAMES)"
+choice="$(pick_environment)"
 echo "$COMPOSE_DIRS" | grep -q . || die "No projects available."
 
 COMPOSE_DIR="$(echo "$COMPOSE_DIRS" | awk -v n="$choice" 'NR==n{print; exit}')"
@@ -170,7 +204,7 @@ if [ -n "$(docker compose ps --status running -q 2>/dev/null || true)" ]; then
     echo "♻️  Stack already running — connecting to the existing container."
 else
     case "$(basename "$COMPOSE_DIR")" in
-        java)
+        java|kitchen-sink-software)
             printf "☕ Java major version:\n" >&2
             printf "  [1] 8\n  [2] 11\n  [3] 17\n  [4] 21\n  [5] 25\n" >&2
             printf "Select [ENTER for latest LTS]: "
