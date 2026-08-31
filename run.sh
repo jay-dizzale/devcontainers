@@ -2,6 +2,8 @@
 # run.sh — Interactive launcher for docker-compose stacks.
 # Usage: run.sh [-v /path/to/mount]
 #        run.sh stop [-v /path/to/mount]   — stop & delete stacks mounted from that dir
+#        run.sh stop --all                 — stop & delete every devcontainer stack
+#        run.sh list                       — list every devcontainer stack
 
 set -eu
 
@@ -14,9 +16,45 @@ INVOCATION_DIR="$(pwd)"
 die() { echo "❌ ERROR: $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
+# Given a list of container IDs, group them by compose project and tear
+# each project down (containers, networks and anonymous volumes removed).
+# ---------------------------------------------------------------------------
+_teardown_containers() {
+    projects="$(
+        for cid in "$@"; do
+            docker inspect "$cid" --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
+        done | sort -u
+    )"
+
+    echo "$projects" | while IFS='|' read -r proj workdir; do
+        [ -n "$proj" ] || continue
+        echo "🛑 Stopping & deleting stack '$proj' (in $workdir) ..."
+        if [ -n "$workdir" ] && [ -d "$workdir" ]; then
+            ( cd "$workdir" && COMPOSE_PROJECT_NAME="$proj" docker compose down -v ) \
+                || echo "⚠️  Failed to tear down $proj" >&2
+        else
+            docker compose -p "$proj" down -v || echo "⚠️  Failed to tear down $proj" >&2
+        fi
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Print the IDs of every container that has a /workspace mount (i.e. every
+# devcontainer stack this launcher could have started, from any directory).
+# ---------------------------------------------------------------------------
+_all_workspace_containers() {
+    candidates="$(docker ps -a -q --filter "label=com.docker.compose.project" 2>/dev/null || true)"
+    [ -n "$candidates" ] || return 0
+    for cid in $candidates; do
+        src="$(docker inspect "$cid" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
+        [ -n "$src" ] && printf '%s\n' "$cid"
+    done
+}
+
+# ---------------------------------------------------------------------------
 # `stop` subcommand — find every compose project whose /workspace mount
 # points at the given directory (default: current directory) and tear it
-# down (containers, networks and anonymous volumes removed).
+# down.
 # ---------------------------------------------------------------------------
 cmd_stop() {
     target="$1"
@@ -32,22 +70,48 @@ cmd_stop() {
     done
     [ -n "$matches" ] || die "No containers mounted from $target."
 
-    projects="$(
-        for cid in $matches; do
-            docker inspect "$cid" --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
-        done | sort -u
-    )"
+    # shellcheck disable=SC2086
+    _teardown_containers $matches
+    exit 0
+}
 
-    echo "$projects" | while IFS='|' read -r proj workdir; do
-        [ -n "$proj" ] || continue
-        echo "🛑 Stopping & deleting stack '$proj' (in $workdir) ..."
-        if [ -n "$workdir" ] && [ -d "$workdir" ]; then
-            ( cd "$workdir" && COMPOSE_PROJECT_NAME="$proj" docker compose down -v ) \
-                || echo "⚠️  Failed to tear down $proj" >&2
-        else
-            docker compose -p "$proj" down -v || echo "⚠️  Failed to tear down $proj" >&2
-        fi
-    done
+# ---------------------------------------------------------------------------
+# `stop --all` subcommand — tear down every devcontainer stack (scoped to
+# /workspace mounts so it never touches unrelated docker-compose projects
+# on the host).
+# ---------------------------------------------------------------------------
+cmd_stop_all() {
+    echo "🔍 Looking for all devcontainer stacks ..."
+
+    matches="$(_all_workspace_containers)"
+    [ -n "$matches" ] || die "No devcontainer stacks found."
+
+    # shellcheck disable=SC2086
+    _teardown_containers $matches
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# `list` subcommand — show every devcontainer stack (project, service,
+# status, mounted workspace) regardless of which directory it was started
+# from.
+# ---------------------------------------------------------------------------
+cmd_list() {
+    matches="$(_all_workspace_containers)"
+    if [ -z "$matches" ]; then
+        echo "No devcontainer stacks found."
+        exit 0
+    fi
+
+    printf "%-28s %-14s %-10s %s\n" "PROJECT" "SERVICE" "STATUS" "WORKSPACE"
+    for cid in $matches; do
+        info="$(docker inspect "$cid" --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
+        [ -n "$info" ] || continue
+        IFS='|' read -r proj svc status src <<EOF
+$info
+EOF
+        printf "%-28s %-14s %-10s %s\n" "$proj" "$svc" "$status" "$src"
+    done | sort -u
     exit 0
 }
 
@@ -55,12 +119,16 @@ cmd_stop() {
 # Arguments  (-v defaults to the directory run.sh was called from)
 # ---------------------------------------------------------------------------
 STOP=0
+STOP_ALL=0
+LIST=0
 VOLUME="$INVOCATION_DIR"
 REBUILD=0
 DEBUG=0
 while [ $# -gt 0 ]; do
     case "$1" in
         stop)         STOP=1;    shift ;;
+        list)         LIST=1;    shift ;;
+        --all)        STOP_ALL=1; shift ;;
         -v|--volume)
             [ $# -ge 2 ] || die "--volume requires a value"
             VOLUME="$2"; shift 2 ;;
@@ -70,6 +138,15 @@ while [ $# -gt 0 ]; do
     esac
 done
 export VOLUME
+
+if [ "$LIST" = "1" ]; then
+    cmd_list
+fi
+
+if [ "$STOP_ALL" = "1" ]; then
+    [ "$STOP" = "1" ] || die "--all is only valid with 'stop'"
+    cmd_stop_all
+fi
 
 if [ "$STOP" = "1" ]; then
     cmd_stop "$(cd "$VOLUME" && pwd)"

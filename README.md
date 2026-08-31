@@ -103,11 +103,22 @@ reconnects to your existing stack instead of rebuilding. Exiting the shell does
 ```sh
 sh run.sh stop                    # tear down stacks mounted from the current directory
 sh run.sh stop -v /path/to/project
+sh run.sh stop --all               # tear down every devcontainer stack, from any directory
 ```
 
-This finds every container whose `/workspace` mount points at that directory and
-runs `docker compose down -v` for each matching stack (containers, networks and
+This finds every container whose `/workspace` mount points at that directory (or,
+with `--all`, every container with a `/workspace` mount at all) and runs
+`docker compose down -v` for each matching stack (containers, networks and
 anonymous volumes removed).
+
+### List running stacks
+
+```sh
+sh run.sh list
+```
+
+Shows every devcontainer stack (project, service, status, mounted workspace
+directory), regardless of which directory it was started from.
 
 ## Run it (VS Code / DevContainers)
 
