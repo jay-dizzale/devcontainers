@@ -33,6 +33,28 @@ _email="${_email:-${_cur_email}}"
 ok "Git identity: ${_name} <${_email}>"
 
 # ---------------------------------------------------------------------------
+# common/.zshrc — generated from the checked-in template so the real name/
+# email never ends up in a commit. Regenerated every run; never git-add this
+# file (see .gitignore).
+# ---------------------------------------------------------------------------
+step "Container shell config (common/.zshrc)"
+
+ZSHRC_TEMPLATE="$SCRIPT_DIR/common/zshrc-template"
+ZSHRC_OUT="$SCRIPT_DIR/common/.zshrc"
+
+if [ -n "$_name" ] && [ -n "$_email" ]; then
+    _escape_sed() { printf '%s' "$1" | sed -e 's/[&|]/\\&/g'; }
+    sed \
+        -e "s|CHANGE_ME@example.com|$(_escape_sed "$_email")|" \
+        -e "s|Change Me|$(_escape_sed "$_name")|" \
+        "$ZSHRC_TEMPLATE" > "$ZSHRC_OUT"
+    ok "common/.zshrc generated with your git identity."
+else
+    cp "$ZSHRC_TEMPLATE" "$ZSHRC_OUT"
+    info "No name/email set — common/.zshrc generated with placeholder identity."
+fi
+
+# ---------------------------------------------------------------------------
 # CA certificate bundle
 # ---------------------------------------------------------------------------
 step "CA certificate bundle"

@@ -81,7 +81,10 @@ service, builds/reuses the container, and drops you into a `zsh` shell.
 # 1. Clone and enter the repository
 git clone <this-repo> && cd <this-repo>
 
-# 2. Launch — mounts the current directory into /workspace by default
+# 2. One-time setup — git identity, common/.zshrc, CA bundle, proxy.env, `dev` command
+sh setup.sh
+
+# 3. Launch — mounts the current directory into /workspace by default
 sh run.sh
 
 # ...or mount a specific project directory into /workspace
@@ -129,8 +132,11 @@ Open the environment's folder (e.g. `toolbelt-infrastructure/`) in VS Code and c
 
 - **Versions** — edit the build `args` in an environment's `docker-compose.yml`
   (or `common/scripts/versions.env` for base tools).
-- **Identity** — the git user is set in `common/.zshrc`; update it to your own
-  name/email.
+- **Identity** — `sh setup.sh` generates `common/.zshrc` from
+  `common/zshrc-template` with the name/email you give it. `common/.zshrc`
+  is gitignored (it holds your real identity); only the template is
+  checked in. Re-run `setup.sh` to change it, or edit `common/.zshrc`
+  directly for a one-off tweak.
 - **Per-environment shell tweaks** — add a `.zshrc2` (already wired up for both toolbelts and `python-with-uv`).
 - **Trim it down** — remove environment folders you don't need.
 - **GitHub API rate limit** — optional. Some install scripts fall back to the

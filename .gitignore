@@ -5,6 +5,11 @@
 **/.bash_history
 .history/
 
+# Generated from common/zshrc-template by setup.sh — contains your real git
+# identity, so it must never be committed. The template (with placeholder
+# identity) is what's checked in.
+/common/.zshrc
+
 # Credential material
 *.pem
 *.key
