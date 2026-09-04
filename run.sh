@@ -4,6 +4,8 @@
 #        run.sh stop [-v /path/to/mount]   — stop & delete stacks mounted from that dir
 #        run.sh stop --all                 — stop & delete every devcontainer stack
 #        run.sh list                       — list every devcontainer stack
+#        run.sh proxy stop                 — stop the shared egress-proxy
+#        run.sh proxy log                  — tail the egress-proxy's access log
 
 set -eu
 
@@ -33,6 +35,12 @@ Usage:
   run.sh list
       List every devcontainer stack (project, service, status, workspace).
 
+  run.sh proxy stop
+      Stop the shared egress-proxy (common/egress-proxy/).
+
+  run.sh proxy log
+      Tail the egress-proxy's access log (look for TCP_DENIED entries).
+
   run.sh -h | --help | help
       Show this help.
 
@@ -42,7 +50,7 @@ Options:
   --debug               Verbose docker build output (--progress=plain).
 
 If installed via setup.sh, all of the above also work as `dev ...`
-(e.g. `dev stop --all`, `dev list`).
+(e.g. `dev stop --all`, `dev list`, `dev proxy log`).
 EOF
     exit 0
 }
@@ -148,11 +156,31 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# `proxy stop` / `proxy log` — manage the shared egress-proxy (see
+# common/egress-proxy/). Independent of any devcontainer's lifecycle, so it
+# isn't touched by `stop`/`stop --all`.
+# ---------------------------------------------------------------------------
+cmd_proxy_stop() {
+    echo "🛑 Stopping shared egress-proxy ..."
+    ( cd "$SCRIPT_DIR/common/egress-proxy" && docker compose down -v ) \
+        || die "Failed to stop egress-proxy."
+    exit 0
+}
+
+cmd_proxy_log() {
+    docker exec -i devcontainer-egress-proxy tail -f /var/log/squid/access.log \
+        || die "egress-proxy is not running. Start it with 'sh setup.sh' or:
+  ( cd common/egress-proxy && docker compose up -d --build )"
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
 # Arguments  (-v defaults to the directory run.sh was called from)
 # ---------------------------------------------------------------------------
 STOP=0
 STOP_ALL=0
 LIST=0
+PROXY_ACTION=""
 VOLUME="$INVOCATION_DIR"
 REBUILD=0
 DEBUG=0
@@ -161,6 +189,15 @@ while [ $# -gt 0 ]; do
         -h|--help|help) cmd_help ;;
         stop)         STOP=1;    shift ;;
         list)         LIST=1;    shift ;;
+        proxy)
+            shift
+            [ $# -ge 1 ] || die "Usage: run.sh proxy <stop|log>"
+            case "$1" in
+                stop) PROXY_ACTION=stop ;;
+                log)  PROXY_ACTION=log ;;
+                *) die "Unknown proxy action: $1 (expected 'stop' or 'log')" ;;
+            esac
+            shift ;;
         --all)        STOP_ALL=1; shift ;;
         -v|--volume)
             [ $# -ge 2 ] || die "--volume requires a value"
@@ -171,6 +208,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 export VOLUME
+
+case "$PROXY_ACTION" in
+    stop) cmd_proxy_stop ;;
+    log)  cmd_proxy_log ;;
+esac
 
 if [ "$LIST" = "1" ]; then
     cmd_list
@@ -302,6 +344,14 @@ else
     COMPOSE_PROJECT_NAME="$(basename "$COMPOSE_DIR")_${_vol_current}"
 fi
 export COMPOSE_PROJECT_NAME
+
+# ---------------------------------------------------------------------------
+# Ensure the shared egress-proxy is up if this environment's docker-compose.yml
+# actually joins it (avoids starting it for environments that don't need it).
+# ---------------------------------------------------------------------------
+if command -v docker >/dev/null 2>&1 && grep -q "devcontainer-egress" docker-compose.yml 2>/dev/null; then
+    sh "$SCRIPT_DIR/common/scripts/ensure-egress-proxy.sh"
+fi
 
 # ---------------------------------------------------------------------------
 # Force rebuild — tears down first so --no-cache is never skipped.

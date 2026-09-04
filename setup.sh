@@ -117,6 +117,42 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Egress-proxy — regenerate squid.conf (chains through the corporate proxy
+# above if one was detected, otherwise egresses directly) and (re)start the
+# shared proxy stack so devcontainers can join it.
+# ---------------------------------------------------------------------------
+step "Egress-proxy (common/egress-proxy)"
+
+EGRESS_DIR="$SCRIPT_DIR/common/egress-proxy"
+SQUID_TEMPLATE="$EGRESS_DIR/squid.conf.template"
+SQUID_CONF="$EGRESS_DIR/squid.conf"
+
+_upstream="${_https:-$_http}"
+if [ -n "$_upstream" ]; then
+    _hostport="${_upstream#*://}"
+    _hostport="${_hostport#*@}"
+    _hostport="${_hostport%%/*}"
+    _peer_host="${_hostport%%:*}"
+    _peer_port="${_hostport##*:}"
+    [ "$_peer_host" != "$_peer_port" ] || _peer_port=80
+    _cache_peer_line="cache_peer ${_peer_host} parent ${_peer_port} 0 no-query default"
+else
+    _cache_peer_line="# no corporate proxy detected — egressing directly"
+fi
+
+awk -v line="$_cache_peer_line" '{ gsub(/# __CACHE_PEER__/, line); print }' \
+    "$SQUID_TEMPLATE" > "$SQUID_CONF"
+
+if command -v docker >/dev/null 2>&1; then
+    ( cd "$EGRESS_DIR" && docker compose up -d --build ) \
+        && ok "egress-proxy running (allowlist: common/egress-proxy/allowlist.txt)" \
+        || info "Could not (re)start egress-proxy — start it manually later if needed."
+else
+    info "docker not found — skipped starting egress-proxy. Run it later with:"
+    info "  ( cd common/egress-proxy && docker compose up -d --build )"
+fi
+
+# ---------------------------------------------------------------------------
 # `dev` command — add shell function to ~/.zshrc
 # ---------------------------------------------------------------------------
 step "'dev' command"

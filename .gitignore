@@ -10,6 +10,10 @@
 # identity) is what's checked in.
 /common/.zshrc
 
+# Generated from common/egress-proxy/squid.conf.template by setup.sh — may
+# embed your corporate proxy host/port. The template is what's checked in.
+/common/egress-proxy/squid.conf
+
 # Credential material
 *.pem
 *.key

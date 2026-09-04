@@ -15,14 +15,30 @@ services:
     extends:
       file: ../common/base.docker-compose.yml
       service: base
-    network_mode: host
+    networks:
+      - egress
+    environment:
+      - HTTP_PROXY=http://egress-proxy:3128
+      - HTTPS_PROXY=http://egress-proxy:3128
+      - NO_PROXY=localhost,127.0.0.1,egress-proxy
     volumes:
       - ./.zshrc2:/home/ubuntu/.zshrc2
       - ~/.aws/:/home/ubuntu/.aws
       - ~/.azure:/home/ubuntu/.azure
       - ~/.terraform.d:/home/ubuntu/.terraform.d
       - ~/.spacelift:/home/ubuntu/.spacelift
+      - egress-proxy-logs:/var/log/egress-proxy:ro
 
 secrets:
   github_token:
     environment: "GITHUB_TOKEN"
+
+networks:
+  egress:
+    name: devcontainer-egress
+    external: true
+
+volumes:
+  egress-proxy-logs:
+    name: devcontainer-egress-logs
+    external: true

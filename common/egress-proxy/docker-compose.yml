@@ -1,0 +1,24 @@
+# Shared, always-on egress-filtering proxy for devcontainer runtime traffic.
+# Started/stopped independently of any single devcontainer session — other
+# environments join its network/volume as `external`, so this stack must
+# already be running before they start (see common/scripts/ensure-egress-proxy.sh).
+services:
+  egress-proxy:
+    build:
+      context: .
+    container_name: devcontainer-egress-proxy
+    restart: unless-stopped
+    networks:
+      - egress
+    volumes:
+      - ./squid.conf:/etc/squid/squid.conf:ro
+      - ./allowlist.txt:/etc/squid/allowlist.txt:ro
+      - egress-proxy-logs:/var/log/squid
+
+networks:
+  egress:
+    name: devcontainer-egress
+
+volumes:
+  egress-proxy-logs:
+    name: devcontainer-egress-logs

@@ -1,0 +1,26 @@
+# Domains devcontainer runtime traffic is allowed to reach through the
+# egress-proxy. One per line; leading "." matches the domain and all
+# subdomains. Edit as needed, then: docker compose -f common/egress-proxy/docker-compose.yml restart
+
+# AWS
+.amazonaws.com
+
+# Spacelift
+.spacelift.io
+
+# Terraform / OpenTofu
+registry.terraform.io
+releases.hashicorp.com
+
+# GitHub (releases, raw content used by several install scripts)
+github.com
+objects.githubusercontent.com
+raw.githubusercontent.com
+api.github.com
+
+# VS Code Server + Marketplace (needed when used as a VS Code Dev Container)
+update.code.visualstudio.com
+vscode.download.prss.microsoft.com
+marketplace.visualstudio.com
+.gallerycdn.vsassets.io
+.gallery.vsassets.io

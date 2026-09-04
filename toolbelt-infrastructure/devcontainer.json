@@ -6,6 +6,9 @@
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "toolbelt-infrastructure",
 	"workspaceFolder": "/workspace",
+	// Ensures the shared egress-proxy (common/egress-proxy/) is running before
+	// compose tries to join its external network — runs on the host.
+	"initializeCommand": "sh ${localWorkspaceFolder}/../common/scripts/ensure-egress-proxy.sh",
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 	// Use 'postCreateCommand' to run commands after the container is created.

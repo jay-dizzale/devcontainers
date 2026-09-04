@@ -123,6 +123,19 @@ sh run.sh list
 Shows every devcontainer stack (project, service, status, mounted workspace
 directory), regardless of which directory it was started from.
 
+### Egress-proxy
+
+```sh
+sh run.sh proxy stop   # stop the shared egress-proxy stack
+sh run.sh proxy log    # tail its access log (see TCP_DENIED for blocked requests)
+```
+
+`setup.sh` builds and starts a shared, always-on egress-filtering proxy
+(`common/egress-proxy/`, Squid with a domain allowlist) that devcontainers can
+opt into for runtime network access — independent of any single
+devcontainer's lifecycle, so `stop`/`stop --all` never touch it. See
+`common/egress-proxy/allowlist.txt` to add domains.
+
 ## Run it (VS Code / DevContainers)
 
 Open the environment's folder (e.g. `toolbelt-infrastructure/`) in VS Code and choose
