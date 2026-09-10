@@ -333,6 +333,26 @@ else
                 5) export JAVA_VERSION=25 ;;
             esac
             ;;
+        ai-notebook)
+            _notebooks_env="$COMPOSE_DIR/.env"
+            _cur_notebooks_path=""
+            [ -f "$_notebooks_env" ] && _cur_notebooks_path="$(grep '^NOTEBOOKS_PATH=' "$_notebooks_env" 2>/dev/null | cut -d= -f2-)"
+
+            printf "📓 Notebook scripts folder path [%s] (ENTER to skip/keep): " "${_cur_notebooks_path:-none}" >&2
+            read -r _notebooks_path
+            _notebooks_path="${_notebooks_path:-${_cur_notebooks_path}}"
+
+            if [ -n "$_notebooks_path" ]; then
+                case "$_notebooks_path" in
+                    "~"/*) _notebooks_path="$HOME/${_notebooks_path#\~/}" ;;
+                esac
+                mkdir -p "$_notebooks_path"
+                printf 'NOTEBOOKS_PATH=%s\n' "$_notebooks_path" > "$_notebooks_env"
+                echo "   -> mounting $_notebooks_path at ~/notebooks" >&2
+            else
+                printf '# NOTEBOOKS_PATH=\n' > "$_notebooks_env"
+            fi
+            ;;
     esac
 
     _up_build="--build"

@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repository is
 
 A **collection of DevContainer environments**, not an application. Each top-level
-folder (`csharp/`, `go/`, `toolbelt-infrastructure/`, `toolbelt-software/`, `java/`, `latex/`, `pico-development/`,
-`python-with-uv/`, `ruby/`, `rust/`, `web/`) is one containerized development environment. All of them
+folder (`ai-notebook/`, `csharp/`, `go/`, `toolbelt-infrastructure/`, `toolbelt-software/`, `java/`, `latex/`,
+`pico-development/`, `python-with-uv/`, `ruby/`, `rust/`, `web/`) is one containerized development environment. All of them
 layer on a shared base defined in `common/`. The goal is reproducible, pinned
 toolchains that developers launch via `run.sh` or VS Code Dev Containers.
 
@@ -54,7 +54,13 @@ image and confirming the tooling installs work (see Commands below).
   `toolbelt-infrastructure` combines the infrastructure tools with Java, Go, `uv`, and Node.js,
   and owns `install-tenv.sh`/`install-terraform-docs.sh`/`install-tflint.sh` directly.
   There is no standalone OpenTofu environment. If you change a shared installer, check the impact
-  on both toolbelts as applicable.
+  on both toolbelts as applicable. `ai-notebook` also reuses `python-with-uv/scripts/install-uv.sh`
+  for the same reason.
+- `ai-notebook` is the only environment whose `docker-compose.yml` overrides `command`
+  (`start-jupyter.sh` instead of the base's `sleep infinity`) — it backgrounds `jupyter lab`
+  against `/workspace` on port 8888, then idles like every other environment. If you add
+  another environment that needs a background process, follow this same pattern rather than
+  changing `common/base.docker-compose.yml`'s default for everyone.
 - The container's mounted workspace (`/workspace`) is bound to `${VOLUME}`, which
   `run.sh` sets to the directory it was invoked from (or `-v <path>`). The compose
   project name is derived as `<env>_<parent-dir>_<current-dir>` so the same host

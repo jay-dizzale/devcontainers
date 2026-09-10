@@ -16,6 +16,7 @@ Every environment builds on the **common base** (see below) and adds its own too
 |-------------|-------|------------------------------------|
 | `toolbelt-software` | General software development | Amazon Corretto JDK, Apache Maven, `uv`, Node.js |
 | `toolbelt-infrastructure` | Infrastructure-as-Code on AWS & Azure | `tenv` (Terraform/OpenTofu), `terraform-docs`, `tflint`, AWS CLI, AWS SSM plugin, Azure CLI, `spacectl` (Spacelift), Amazon Corretto JDK, Kafka + MSK IAM auth, Go, `uv`, Node.js |
+| `ai-notebook` | AI/ML projects | `uv`, JupyterLab (auto-starts in the background on port 8888) |
 | `csharp`    | .NET development | .NET SDK, .NET Runtime |
 | `pico-development` | Raspberry Pi Pico / RP2040 firmware | `arm-none-eabi` GCC toolchain, `pico-sdk`, `pico-extras`, `pico-examples` |
 | `go`        | Go development | Go |
@@ -66,6 +67,46 @@ Adding a future agent needs no Dockerfile/docker-compose.yml changes — just a 
 `common/agents/install-agents.sh`.
 
 Pinned base versions live in `common/scripts/versions.env`.
+
+### AI Notebook
+
+`ai-notebook` is a sandbox for AI-assisted work: it deliberately limits what an
+AI tool running inside it can reach, without limiting what it can *do* to the
+files you're actually working on.
+
+**Idle pattern**: unlike every other environment's `sleep infinity`, its
+`docker-compose.yml` overrides `command` to run `start-jupyter.sh`, which
+launches `jupyter lab` in the background (log at `~/.jupyter-lab.log` inside
+the container), then idles like everything else so `run.sh`/`docker compose
+exec` still work normally. JupyterLab is reachable at <http://localhost:8888>
+(no token — the port is bound to `127.0.0.1` only).
+
+**Two host bridges, both explicit**: `/workspace` (aka `~/workspace` in
+JupyterLab's file browser) is the data your notebooks edit; `~/notebooks` is
+an optional second bind mount for your notebook-scripts folder, kept
+separate so you can version it independently (its own git repo, your normal
+host editor/IDE) without mixing it into the data being worked on. `sh
+setup.sh` asks for the host path and writes it to `ai-notebook/.env`
+(gitignored — Compose auto-loads it for the `NOTEBOOKS_PATH` variable);
+re-run it to change the path, or edit that file directly. Leave it empty to
+skip this — mounts an empty placeholder folder instead, and you can still
+work directly in `/workspace` via JupyterLab.
+
+**Local LLM inference (Ollama, etc.)**: run it natively on the host, not
+inside the container — no container runtime on macOS (Docker, Colima, or
+Apple's own `container`) can pass through Metal/Neural-Engine acceleration to
+a Linux guest, so a containerized Ollama falls back to CPU-only. Keep Ollama
+bound to its default `127.0.0.1` (verify with `lsof -iTCP -sTCP:LISTEN -P |
+grep 11434`) — do **not** bind it to `0.0.0.0` to make it reachable, since
+that exposes it to your whole LAN. Colima's networking can reach a
+host-loopback-bound service directly via `host.docker.internal`, so the
+notebook just calls `http://host.docker.internal:11434`, and Ollama never
+needs to leave its safe default.
+
+Only `uv` + JupyterLab are preinstalled; add your project's own dependencies
+(numpy, pandas, torch, …) via `uv add`, then register that venv as a Jupyter
+kernel with `uv run --with ipykernel python -m ipykernel install --user
+--name <project>` so it shows up in JupyterLab's kernel picker.
 
 ## Preconditions
 

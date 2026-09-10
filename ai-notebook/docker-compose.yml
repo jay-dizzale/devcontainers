@@ -1,0 +1,34 @@
+services:
+  ai-notebook:
+    extends:
+      file: ../common/base.docker-compose.yml
+      service: base
+    build:
+      context: ..
+      dockerfile: ai-notebook/Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+        JUPYTERLAB_VERSION: ${JUPYTERLAB_VERSION:-}
+      secrets:
+        - github_token
+    # Overrides the base's `sleep infinity` — JupyterLab launches in the
+    # background, then this itself idles, so `run.sh`/`docker compose exec`
+    # still work exactly like every other environment.
+    command: ["/usr/local/bin/start-jupyter.sh"]
+    # NOTEBOOKS_PATH (optional) — set via `sh setup.sh` (writes ./.env, which
+    # Compose auto-loads for variable substitution below) or edit ./.env
+    # directly. Falls back to the empty, tracked ./notebooks-default/ so
+    # `docker compose up` still works before setup.sh has ever run.
+    volumes:
+      - ${NOTEBOOKS_PATH:-./notebooks-default}:/home/ubuntu/notebooks
+    ports:
+      - "127.0.0.1:8888:8888"
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

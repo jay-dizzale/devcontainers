@@ -26,6 +26,7 @@ id_ed25519*
 .env
 .env.*
 !versions.env
+!.env.example
 
 # Host config that gets mounted at runtime (must never be baked in)
 **/.aws/
