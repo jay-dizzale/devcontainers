@@ -1,2 +1,0 @@
-export UV_LINK_MODE=copy
-export PATH="/home/ubuntu/.local/bin:$PATH"

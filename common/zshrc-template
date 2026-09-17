@@ -61,4 +61,9 @@ fi
 
 export PATH="$HOME/.local/bin:$PATH"
 
+# uv (Python version/venv manager) is installed on every image — copy instead
+# of hardlinking so caches on a different filesystem (e.g. a bind-mounted
+# /workspace) don't break.
+export UV_LINK_MODE=copy
+
 [ -t 1 ] && motd

@@ -22,8 +22,6 @@ services:
       - "127.0.0.1:8100-8109:8080" # Actix/common Rust dev server default
       - "127.0.0.1:8090-8099:8080" # common Go net/http dev server default
       - "127.0.0.1:2345-2354:2345" # Delve default debug port
-    volumes:
-      - ./.zshrc2:/home/ubuntu/.zshrc2
 
 secrets:
   github_token:

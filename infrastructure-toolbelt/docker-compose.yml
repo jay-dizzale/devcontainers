@@ -4,6 +4,7 @@ services:
       context: ..
       dockerfile: infrastructure-toolbelt/Dockerfile
       args:
+        RUST_VERSION: ${RUST_VERSION:-stable}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}

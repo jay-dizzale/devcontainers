@@ -10,11 +10,12 @@ in VS Code / any DevContainer-aware editor.
 
 ## Available environments
 
-Every environment builds on the **common base** (see below) and adds its own tools:
+Every environment builds on the **common base** (see below), which now includes
+Ruby, Rust, Go, and Python/`uv`, and adds its own tools on top:
 
 | Environment | Focus | Tools installed on top of the base |
 |-------------|-------|------------------------------------|
-| `base-toolbelt` | Ruby, Rust, Go, Python & C development | Ruby (built from source), `rustup` + Rust toolchain, Go, `uv` (Python version & venv manager), `build-essential` (gcc) |
+| `base-toolbelt` | Ruby, Rust, Go, Python & C development | Nothing extra — the plain common base, with dev-server/debugger port mappings for these languages |
 | `infrastructure-toolbelt` | Infrastructure-as-Code on AWS & Azure | `tenv` (Terraform/OpenTofu), `terraform-docs`, `tflint`, AWS CLI, AWS SSM plugin, Azure CLI, `spacectl` (Spacelift), Kafka + MSK IAM auth |
 | `java-toolbelt` | Java development | Amazon Corretto JDK, Apache Maven |
 | `latex-toolbelt` | Document authoring | `texlive-full` (with Perl/Tk GUI support) |
@@ -38,6 +39,9 @@ Everything in `common/` is shared by all environments (`common/base.docker-compo
 - **Base OS & build tooling** — Ubuntu `noble`, `build-essential`, `make`, `git`,
   `curl`/`wget`, `jq`, `unzip`/`zip`, `vim`, `zsh`, plus the common `-dev` headers
   needed to build languages from source.
+- **Ruby** (built from source), **`rustup`** + Rust toolchain, **Go**, and **`uv`**
+  (Python version & venv manager) — every environment gets these, not just
+  `base-toolbelt`.
 - **`gh`** — GitHub CLI.
 - **`tea`** — Gitea CLI.
 - **A preconfigured `zsh`** — history, git config, prompt and a `gitpush` helper
@@ -130,7 +134,7 @@ Open the environment's folder (e.g. `infrastructure-toolbelt/`) in VS Code and c
   is gitignored (it holds your real identity); only the template is
   checked in. Re-run `setup.sh` to change it, or edit `common/.zshrc`
   directly for a one-off tweak.
-- **Per-environment shell tweaks** — add a `.zshrc2` (already wired up for `base-toolbelt` and `infrastructure-toolbelt`).
+- **Per-environment shell tweaks** — add a `.zshrc2` (already wired up for `infrastructure-toolbelt`).
 - **Trim it down** — remove environment folders you don't need.
 - **GitHub API rate limit** — optional. Some install scripts fall back to the
   GitHub API to resolve "latest" versions, which is capped at 60 unauthenticated

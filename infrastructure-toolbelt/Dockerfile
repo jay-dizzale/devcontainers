@@ -42,3 +42,8 @@ RUN rm -rf /tmp/*
 VOLUME [ "/workspace" ]
 USER ubuntu
 WORKDIR /workspace
+
+## Install the Rust toolchain (rustup itself installed above, as root)
+ARG RUST_VERSION=stable
+RUN rustup toolchain install "${RUST_VERSION}" && rustup default "${RUST_VERSION}"
+ENV PATH="/home/ubuntu/.cargo/bin:${PATH}"

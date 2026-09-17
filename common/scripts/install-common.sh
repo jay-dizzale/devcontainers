@@ -37,6 +37,7 @@ apt-get install -qqy apt-transport-https \
   make \
   make build-essential \
   mandoc \
+  rustup \
   socat \
   software-properties-common \
   tk-dev \
@@ -53,5 +54,12 @@ localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 sh install-gh.sh
 sh install-tea.sh
 sh install-trivy.sh
+
+## Ruby, Go, and uv (Python) are part of the common base so every toolbelt
+## gets them, not just base-toolbelt. The dev headers above (libssl-dev,
+## libreadline-dev, ...) are ruby-build's standard dependencies.
+sh install-ruby.sh
+sh install-go.sh
+sh install-uv.sh
 
 install -m 755 /tmp/motd.sh /usr/local/bin/motd
