@@ -4,7 +4,7 @@
 	"name": "latex-toolbelt",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"dockerComposeFile": "./docker-compose.yml",
-	"service": "latex-toolbelt",
+	"service": "dev",
 	"workspaceFolder": "/workspace",
 	"customizations": {
 		"vscode": {

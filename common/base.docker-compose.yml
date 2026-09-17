@@ -2,6 +2,13 @@ services:
   base:
     init: true
     user: 1000:1000
+    labels:
+      # Identifies which host directory + environment started this stack.
+      # run.sh matches on these (not the project name) to find an existing
+      # stack to reconnect to, since project names are now random and no
+      # longer encode the path.
+      - "devcontainer.workspace=${VOLUME:-../..}"
+      - "devcontainer.env=${DEVCONTAINER_ENV:-}"
     environment:
       - LANG=en_US.UTF-8
       - LANGUAGE=en_US:en

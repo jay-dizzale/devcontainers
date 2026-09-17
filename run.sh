@@ -170,6 +170,7 @@ while [ $# -gt 0 ]; do
         *) die "Unknown argument: $1" ;;
     esac
 done
+VOLUME="$(cd "$VOLUME" 2>/dev/null && pwd)" || die "Volume directory not found: $VOLUME"
 export VOLUME
 
 if [ "$LIST" = "1" ]; then
@@ -182,7 +183,7 @@ if [ "$STOP_ALL" = "1" ]; then
 fi
 
 if [ "$STOP" = "1" ]; then
-    cmd_stop "$(cd "$VOLUME" && pwd)"
+    cmd_stop "$VOLUME"
 fi
 
 # ---------------------------------------------------------------------------
@@ -289,17 +290,21 @@ echo "📂 Working in: $(pwd)"
 echo "📁 Mounting volume: ${VOLUME}"
 
 # ---------------------------------------------------------------------------
-# Derive a human-readable project name: <env>_<parent>_<current>
-# e.g. java_projects_myapp  — sanitised to lowercase alphanumeric + hyphens.
+# Project name: <env>-<hash of the full absolute workspace path>. Compose
+# project names can't contain the path directly (must match
+# ^[a-z0-9][a-z0-9_-]*$ — no slashes), and truncating to just the last path
+# segments (the old scheme) let two different directories collide on the
+# same name, e.g. .../alice/myapp and .../bob/myapp. Hashing the *whole*
+# absolute path keeps the name deterministic — same directory always
+# reconnects to the same stack, no lookup needed — while being effectively
+# collision-free. Every stack is also labelled with its exact workspace path
+# and environment (see common/base.docker-compose.yml) for identification.
 # ---------------------------------------------------------------------------
-_sanitize() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/-*$//'; }
-_vol_parent="$(_sanitize "$(basename "$(dirname "$VOLUME")")")"
-_vol_current="$(_sanitize "$(basename "$VOLUME")")"
-if [ -n "$_vol_parent" ]; then
-    COMPOSE_PROJECT_NAME="$(basename "$COMPOSE_DIR")_${_vol_parent}_${_vol_current}"
-else
-    COMPOSE_PROJECT_NAME="$(basename "$COMPOSE_DIR")_${_vol_current}"
-fi
+ENV_NAME="$(basename "$COMPOSE_DIR")"
+export DEVCONTAINER_ENV="$ENV_NAME"
+
+VOLUME_HASH="$(printf '%s' "$VOLUME" | sha256sum | cut -c1-12)"
+COMPOSE_PROJECT_NAME="${ENV_NAME}-${VOLUME_HASH}"
 export COMPOSE_PROJECT_NAME
 
 # ---------------------------------------------------------------------------
@@ -318,7 +323,7 @@ fi
 if [ -n "$(docker compose ps --status running -q 2>/dev/null || true)" ]; then
     echo "♻️  Stack already running — connecting to the existing container."
 else
-    case "$(basename "$COMPOSE_DIR")" in
+    case "$ENV_NAME" in
         java-toolbelt)
             printf "☕ Java major version:\n" >&2
             printf "  [1] 8\n  [2] 11\n  [3] 17\n  [4] 21\n  [5] 25\n" >&2

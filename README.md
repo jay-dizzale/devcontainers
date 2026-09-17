@@ -93,9 +93,16 @@ You'll be prompted to:
 2. **Select a service** (auto-selected when there's only one; enter `s` to keep the
    stack running without opening a shell).
 
-The same host directory always maps to the same container, so re-running `run.sh`
-reconnects to your existing stack instead of rebuilding. Exiting the shell does
-**not** stop or delete the stack — it keeps running so reconnecting is instant. Use
+The same host directory + environment always reconnects to the same stack, so
+re-running `run.sh` picks up your existing container instead of rebuilding.
+The project name is `<env>-<hash of the full absolute workspace path>` rather
+than the old `<env>_<parent-dir>_<current-dir>` scheme, so two different
+directories that happen to share their last path segments (e.g.
+`.../alice/myapp` and `.../bob/myapp`) never collide. Each stack is also
+labelled with its exact workspace path and environment
+(`devcontainer.workspace`/`devcontainer.env` in `common/base.docker-compose.yml`)
+for identification. Exiting the shell does **not** stop or
+delete the stack — it keeps running so reconnecting is instant. Use
 `sh run.sh stop` (below) when you actually want to tear it down.
 
 ### Stop & delete a stack

@@ -1,5 +1,5 @@
 services:
-  base-toolbelt:
+  dev:
     extends:
       file: ../common/base.docker-compose.yml
       service: base

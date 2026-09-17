@@ -79,6 +79,20 @@ images and the scripts that build them.
 - No environment uses `network_mode: host` — every environment (including
   `infrastructure-toolbelt`, which previously used it) runs on Compose's
   default bridge network.
+- The container's mounted workspace (`/workspace`) is bound to `${VOLUME}`, which
+  `run.sh` resolves to an absolute path. `COMPOSE_PROJECT_NAME` is `<env>-<sha256
+  of the full absolute VOLUME path, first 12 hex chars>` — deterministic, but not
+  truncated to just the last path segments, since two different absolute
+  directories can share those (e.g. `.../alice/myapp` and `.../bob/myapp`) and
+  collide on the same project name, making `run.sh` reconnect to (or
+  `docker compose up` recreate) the wrong directory's stack. Every stack is also
+  labelled with its exact workspace path and environment
+  (`devcontainer.workspace`/`devcontainer.env` in `common/base.docker-compose.yml`).
+- Every `<env>/docker-compose.yml` names its (single) service `dev`, not the env
+  name — the container name is `<project>-<service>-<index>`, and the project
+  name already has an `<env>-` prefix, so naming the service after the env too
+  would duplicate it. `<env>/devcontainer.json`'s `"service"` field must stay in
+  sync with this.
 - `~/.config/gh`, `~/.config/tea/config.yml` are mounted **read-only**; `~/.claude`,
   `~/.claude.json`, and `~/.copilot` are mounted **read-write** so the agent CLIs can
   persist session/auth state.

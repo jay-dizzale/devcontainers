@@ -82,9 +82,22 @@ image and confirming the tooling installs work (see Commands below).
   `infrastructure-toolbelt`, which previously did) runs on Compose's default
   bridge network.
 - The container's mounted workspace (`/workspace`) is bound to `${VOLUME}`, which
-  `run.sh` sets to the directory it was invoked from (or `-v <path>`). The compose
-  project name is derived as `<env>_<parent-dir>_<current-dir>` so the same host
-  directory always reconnects to the same stack.
+  `run.sh` resolves to an absolute path (the directory it was invoked from, or
+  `-v <path>`). `COMPOSE_PROJECT_NAME` is `<env>-<sha256 of the full absolute
+  VOLUME path, first 12 hex chars>` — deterministic (same directory always
+  reconnects to the same stack, no lookup needed) but not truncated to just the
+  last path segments the way the old `<env>_<parent-dir>_<current-dir>` scheme
+  was, since two different absolute directories can share those segments (e.g.
+  `.../alice/myapp` and `.../bob/myapp`) and collide on the same project name —
+  which would make `run.sh` reconnect to (or `docker compose up` recreate) the
+  wrong directory's stack. Every stack is also labelled with its exact workspace
+  path and environment (`devcontainer.workspace`/`devcontainer.env` in
+  `common/base.docker-compose.yml`) for identification.
+- Every `<env>/docker-compose.yml` names its (single) service `dev`, not the
+  env name — the container name is `<project>-<service>-<index>`, so naming
+  the service after the env (which is already the `<env>-<hash>` project
+  prefix) would duplicate it, e.g. `base-toolbelt-<hash>-base-toolbelt-1`.
+  `<env>/devcontainer.json`'s `"service"` field must stay in sync with this.
 - `~/.config/gh`, `~/.config/tea/config.yml` are mounted **read-only**; `~/.claude`,
   `~/.claude.json`, and `~/.copilot` are mounted **read-write** so the agent CLIs can
   persist session/auth state. Never bake host secrets (`~/.aws`, `~/.azure`,

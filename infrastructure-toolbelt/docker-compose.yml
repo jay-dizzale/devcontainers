@@ -1,5 +1,5 @@
 services:
-  infrastructure-toolbelt:
+  dev:
     build:
       context: ..
       dockerfile: infrastructure-toolbelt/Dockerfile

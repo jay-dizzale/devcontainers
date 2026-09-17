@@ -1,5 +1,5 @@
 services:
-  pico-toolbelt:
+  dev:
     build:
       context: ..
       dockerfile: ./pico-toolbelt/Dockerfile
