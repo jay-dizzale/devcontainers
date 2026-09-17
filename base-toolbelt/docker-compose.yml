@@ -1,0 +1,30 @@
+services:
+  base-toolbelt:
+    extends:
+      file: ../common/base.docker-compose.yml
+      service: base
+    build:
+      context: ..
+      dockerfile: base-toolbelt/Dockerfile
+      args:
+        RUST_VERSION: ${RUST_VERSION:-stable}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+      secrets:
+        - github_token
+    ports:
+      - "127.0.0.1:3010-3019:3000" # Rails/Puma default dev server
+      - "127.0.0.1:8000-8009:8000" # Rocket default dev server
+      - "127.0.0.1:8100-8109:8080" # Actix/common Rust dev server default
+      - "127.0.0.1:8090-8099:8080" # common Go net/http dev server default
+      - "127.0.0.1:2345-2354:2345" # Delve default debug port
+    volumes:
+      - ./.zshrc2:/home/ubuntu/.zshrc2
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

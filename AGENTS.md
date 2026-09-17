@@ -6,10 +6,11 @@ This file gives AI coding agents (Claude Code, and any other agent that reads
 ## What this repository is
 
 A **collection of DevContainer environments**, not an application. Each top-level
-folder (`ai-notebook/`, `csharp/`, `go/`, `toolbelt-infrastructure/`, `toolbelt-software/`, `java/`, `latex/`,
-`pico-development/`, `python-with-uv/`, `ruby/`, `rust/`, `web/`) is one containerized development environment. All of them
-layer on a shared base defined in `common/`. The goal is reproducible toolchains
-that developers launch via `run.sh` or VS Code Dev Containers.
+folder ending in `-toolbelt` (`base-toolbelt/`, `infrastructure-toolbelt/`,
+`java-toolbelt/`, `latex-toolbelt/`, `pico-toolbelt/`, `web-toolbelt/`) is one
+containerized development environment. All of them layer on a shared base
+defined in `common/`. The goal is reproducible toolchains that developers
+launch via `run.sh` or VS Code Dev Containers.
 
 There is **no application code to run or test here** — the "product" is the Docker
 images and the scripts that build them.
@@ -45,24 +46,27 @@ images and the scripts that build them.
 
 - Each `<env>/docker-compose.yml` **extends** `common/base.docker-compose.yml`. Where a
   tool's version is pinned, it's set as a build `arg` there (e.g. `JAVA_VERSION` in
-  `java/docker-compose.yml`) — change it there, not in the Dockerfile.
+  `java-toolbelt/docker-compose.yml`) — change it there, not in the Dockerfile.
 - Each `<env>/Dockerfile` uses **build context `..`** (the repo root), so it can `ADD`
   from both `common/` and the env folder. Keep that in mind when adding `ADD`/`COPY` paths.
 - Dockerfiles always run `common/scripts/install-common.sh` first, then
   `common/agents/install-agents.sh`, then env-specific `install-*.sh` scripts, then
   `rm -rf /tmp/*`.
-- The toolbelt environments intentionally reuse install scripts from **other** env folders.
-  `toolbelt-software` combines Java, `uv`, and Node.js.
-  `toolbelt-infrastructure` combines the infrastructure tools with Java, Go, `uv`, and Node.js,
-  and owns `install-tenv.sh`/`install-terraform-docs.sh`/`install-tflint.sh` directly.
-  There is no standalone OpenTofu environment. If you change a shared installer, check the impact
-  on both toolbelts as applicable. `ai-notebook` also reuses `python-with-uv/scripts/install-uv.sh`
-  for the same reason.
-- `ai-notebook` is the only environment whose `docker-compose.yml` overrides `command`
-  (`start-jupyter.sh` instead of the base's `sleep infinity`) — it backgrounds `jupyter lab`
-  against `/workspace` on port 8888, then idles like every other environment. If you add
-  another environment that needs a background process, follow this same pattern rather than
+- All six environments are named `<focus>-toolbelt` and are fully
+  self-contained — each owns its own `scripts/` directory and does not `ADD`
+  from any other env folder. `base-toolbelt` bundles Ruby, Rust, Go, and `uv`
+  (Python) together (gcc/`build-essential` comes for free from the common
+  base, covering C). `infrastructure-toolbelt` is IaC/cloud-only (`tenv`,
+  `terraform-docs`, `tflint`, AWS/Azure CLIs, `spacectl`, Kafka) — it does
+  **not** bundle Java/Go/uv/Node.js. There is no standalone OpenTofu
+  environment; infra tooling lives entirely in `infrastructure-toolbelt`.
+- No environment currently overrides `docker-compose.yml`'s `command` — every
+  environment idles on the base's `sleep infinity`. If you add one that needs
+  a background process, add the override on that env's service rather than
   changing `common/base.docker-compose.yml`'s default for everyone.
+- No environment uses `network_mode: host` — every environment (including
+  `infrastructure-toolbelt`, which previously used it) runs on Compose's
+  default bridge network.
 - `~/.config/gh`, `~/.config/tea/config.yml` are mounted **read-only**; `~/.claude`,
   `~/.claude.json`, and `~/.copilot` are mounted **read-write** so the agent CLIs can
   persist session/auth state.

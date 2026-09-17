@@ -1,4 +1,4 @@
-# `🧰 DevContainers — a toolbox of ready-to-use development environments`
+# `🛠️ DevContainers — a toolbox of ready-to-use development environments`
 
 A collection of self-contained [DevContainer](https://containers.dev/) environments.
 Each one bundles a language runtime and its typical tooling on a shared Ubuntu
@@ -14,18 +14,12 @@ Every environment builds on the **common base** (see below) and adds its own too
 
 | Environment | Focus | Tools installed on top of the base |
 |-------------|-------|------------------------------------|
-| `toolbelt-software` | General software development | Amazon Corretto JDK, Apache Maven, `uv`, Node.js |
-| `toolbelt-infrastructure` | Infrastructure-as-Code on AWS & Azure | `tenv` (Terraform/OpenTofu), `terraform-docs`, `tflint`, AWS CLI, AWS SSM plugin, Azure CLI, `spacectl` (Spacelift), Amazon Corretto JDK, Kafka + MSK IAM auth, Go, `uv`, Node.js |
-| `ai-notebook` | AI/ML projects | `uv`, JupyterLab (auto-starts in the background on port 8888) |
-| `csharp`    | .NET development | .NET SDK, .NET Runtime |
-| `pico-development` | Raspberry Pi Pico / RP2040 firmware | `arm-none-eabi` GCC toolchain, `pico-sdk`, `pico-extras`, `pico-examples` |
-| `go`        | Go development | Go |
-| `java`      | Java development | Amazon Corretto JDK, Apache Maven |
-| `latex`     | Document authoring | `texlive-full` (with Perl/Tk GUI support) |
-| `ruby`      | Ruby development | Ruby (built from source) |
-| `rust`      | Rust development | `rustup` + Rust toolchain, `build-essential` |
-| `python-with-uv` | Python development | `uv` (Python version & venv manager) |
-| `web`       | Web / Node.js development | Node.js (incl. npm) |
+| `base-toolbelt` | Ruby, Rust, Go, Python & C development | Ruby (built from source), `rustup` + Rust toolchain, Go, `uv` (Python version & venv manager), `build-essential` (gcc) |
+| `infrastructure-toolbelt` | Infrastructure-as-Code on AWS & Azure | `tenv` (Terraform/OpenTofu), `terraform-docs`, `tflint`, AWS CLI, AWS SSM plugin, Azure CLI, `spacectl` (Spacelift), Kafka + MSK IAM auth |
+| `java-toolbelt` | Java development | Amazon Corretto JDK, Apache Maven |
+| `latex-toolbelt` | Document authoring | `texlive-full` (with Perl/Tk GUI support) |
+| `pico-toolbelt` | Raspberry Pi Pico / RP2040 firmware | `arm-none-eabi` GCC toolchain, `pico-sdk`, `pico-extras`, `pico-examples` |
+| `web-toolbelt` | Web / Node.js development | Node.js (incl. npm) |
 
 > By default every tool resolves the **latest stable release** at build time (see
 > `common/scripts/versions.env`) — nothing above is pinned to a fixed version number.
@@ -33,10 +27,8 @@ Every environment builds on the **common base** (see below) and adds its own too
 > `docker-compose.yml` (e.g. `JAVA_VERSION`, `RUST_VERSION`); each install script
 > accepts it as `$1`/env-var fallback. Not every tool has that arg wired through yet —
 > check the env's `docker-compose.yml` before assuming one is reachable.
-> The launcher lists the two toolbelts first. `toolbelt-software` combines
-> Java, Python via `uv`, and Node.js. `toolbelt-infrastructure` covers
-> OpenTofu/Terraform, AWS/Azure, Kafka, Go, Python via `uv`, and Node.js.
-> The focused environments remain available below them.
+> The launcher lists `base-toolbelt` first, in its own category, followed by
+> the other five toolbelts alphabetically.
 
 ## The common base
 
@@ -68,46 +60,6 @@ Adding a future agent needs no Dockerfile/docker-compose.yml changes — just a 
 
 Pinned base versions live in `common/scripts/versions.env`.
 
-### AI Notebook
-
-`ai-notebook` is a sandbox for AI-assisted work: it deliberately limits what an
-AI tool running inside it can reach, without limiting what it can *do* to the
-files you're actually working on.
-
-**Idle pattern**: unlike every other environment's `sleep infinity`, its
-`docker-compose.yml` overrides `command` to run `start-jupyter.sh`, which
-launches `jupyter lab` in the background (log at `~/.jupyter-lab.log` inside
-the container), then idles like everything else so `run.sh`/`docker compose
-exec` still work normally. JupyterLab is reachable at <http://localhost:8888>
-(no token — the port is bound to `127.0.0.1` only).
-
-**Two host bridges, both explicit**: `/workspace` (aka `~/workspace` in
-JupyterLab's file browser) is the data your notebooks edit; `~/notebooks` is
-an optional second bind mount for your notebook-scripts folder, kept
-separate so you can version it independently (its own git repo, your normal
-host editor/IDE) without mixing it into the data being worked on. `sh
-setup.sh` asks for the host path and writes it to `ai-notebook/.env`
-(gitignored — Compose auto-loads it for the `NOTEBOOKS_PATH` variable);
-re-run it to change the path, or edit that file directly. Leave it empty to
-skip this — mounts an empty placeholder folder instead, and you can still
-work directly in `/workspace` via JupyterLab.
-
-**Local LLM inference (Ollama, etc.)**: run it natively on the host, not
-inside the container — no container runtime on macOS (Docker, Colima, or
-Apple's own `container`) can pass through Metal/Neural-Engine acceleration to
-a Linux guest, so a containerized Ollama falls back to CPU-only. Keep Ollama
-bound to its default `127.0.0.1` (verify with `lsof -iTCP -sTCP:LISTEN -P |
-grep 11434`) — do **not** bind it to `0.0.0.0` to make it reachable, since
-that exposes it to your whole LAN. Colima's networking can reach a
-host-loopback-bound service directly via `host.docker.internal`, so the
-notebook just calls `http://host.docker.internal:11434`, and Ollama never
-needs to leave its safe default.
-
-Only `uv` + JupyterLab are preinstalled; add your project's own dependencies
-(numpy, pandas, torch, …) via `uv add`, then register that venv as a Jupyter
-kernel with `uv run --with ipykernel python -m ipykernel install --user
---name <project>` so it shows up in JupyterLab's kernel picker.
-
 ## Preconditions
 
 - Docker (with the Compose plugin) and a container runtime.
@@ -133,7 +85,7 @@ sh run.sh -v /path/to/your/project
 ```
 
 You'll be prompted to:
-1. **Select a toolbelt or focused environment** (e.g. `toolbelt-software`, `go`, `rust`…).
+1. **Select an environment** — `base-toolbelt`, or one of the other toolbelts (e.g. `java-toolbelt`, `web-toolbelt`…).
 2. **Select a service** (auto-selected when there's only one; enter `s` to keep the
    stack running without opening a shell).
 
@@ -166,7 +118,7 @@ directory), regardless of which directory it was started from.
 
 ## Run it (VS Code / DevContainers)
 
-Open the environment's folder (e.g. `toolbelt-infrastructure/`) in VS Code and choose
+Open the environment's folder (e.g. `infrastructure-toolbelt/`) in VS Code and choose
 **"Reopen in Container"**. The environment's `devcontainer.json` handles the rest.
 
 ## Configure it
@@ -178,7 +130,7 @@ Open the environment's folder (e.g. `toolbelt-infrastructure/`) in VS Code and c
   is gitignored (it holds your real identity); only the template is
   checked in. Re-run `setup.sh` to change it, or edit `common/.zshrc`
   directly for a one-off tweak.
-- **Per-environment shell tweaks** — add a `.zshrc2` (already wired up for both toolbelts and `python-with-uv`).
+- **Per-environment shell tweaks** — add a `.zshrc2` (already wired up for `base-toolbelt` and `infrastructure-toolbelt`).
 - **Trim it down** — remove environment folders you don't need.
 - **GitHub API rate limit** — optional. Some install scripts fall back to the
   GitHub API to resolve "latest" versions, which is capped at 60 unauthenticated

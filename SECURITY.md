@@ -55,6 +55,6 @@ Out of scope:
 ## What to Include
 
 - The affected file/script and, if applicable, which environment
-  (`csharp`, `go`, `toolbelt-infrastructure`, …).
+  (`base-toolbelt`, `infrastructure-toolbelt`, …).
 - Steps to reproduce, or the specific code path that's affected.
 - The potential impact (e.g. "an attacker who controls X could achieve Y").
