@@ -226,23 +226,23 @@ pick_from_list() {
 }
 
 pick_environment() {
-    echo "🧰 Toolbelt environments:" >&2
+    echo "==================== Base environment ====================" >&2
     i=1
     for item in $COMPOSE_NAMES; do
         case "$item" in
-            toolbelt-*)
+            base-toolbelt)
                 printf "  [%s] %s\n" "$i" "$item" >&2
                 ;;
         esac
         i=$((i + 1))
     done
 
-    echo "🎯 Specific development environments:" >&2
+    echo "================= Toolbelt environments =================" >&2
     i=1
     for item in $COMPOSE_NAMES; do
         case "$item" in
-            toolbelt-*) ;;
-            *) printf "  [%s] %s\n" "$i" "$item" >&2 ;;
+            base-toolbelt) ;;
+            *-toolbelt) printf "  [%s] %s\n" "$i" "$item" >&2 ;;
         esac
         i=$((i + 1))
     done
@@ -253,16 +253,15 @@ pick_environment() {
 }
 
 # ---------------------------------------------------------------------------
-# Discover compose files (max depth 2, deduplicated). Toolbelts sort first.
+# Discover compose files (max depth 2, deduplicated). Base toolbelt sorts first.
 # ---------------------------------------------------------------------------
 COMPOSE_DIRS="$(
     find -L "$SCRIPT_DIR" -maxdepth 2 -type f \( -name docker-compose.yml -o -name docker-compose.yaml \) \
     | xargs -I{} dirname {} \
     | sort -u \
     | awk '
-        /\/toolbelt-software$/       { print "1|" $0; next }
-        /\/toolbelt-infrastructure$/ { print "2|" $0; next }
-                                    { print "3|" $0 }
+        /\/base-toolbelt$/ { print "1|" $0; next }
+                            { print "2|" $0 }
       ' \
     | sort -t'|' -k1,1n -k2,2 \
     | cut -d'|' -f2-
@@ -320,7 +319,7 @@ if [ -n "$(docker compose ps --status running -q 2>/dev/null || true)" ]; then
     echo "♻️  Stack already running — connecting to the existing container."
 else
     case "$(basename "$COMPOSE_DIR")" in
-        java|toolbelt-software)
+        java-toolbelt)
             printf "☕ Java major version:\n" >&2
             printf "  [1] 8\n  [2] 11\n  [3] 17\n  [4] 21\n  [5] 25\n" >&2
             printf "Select [ENTER for latest LTS]: "
@@ -332,26 +331,6 @@ else
                 4) export JAVA_VERSION=21 ;;
                 5) export JAVA_VERSION=25 ;;
             esac
-            ;;
-        ai-notebook)
-            _notebooks_env="$COMPOSE_DIR/.env"
-            _cur_notebooks_path=""
-            [ -f "$_notebooks_env" ] && _cur_notebooks_path="$(grep '^NOTEBOOKS_PATH=' "$_notebooks_env" 2>/dev/null | cut -d= -f2-)"
-
-            printf "📓 Notebook scripts folder path [%s] (ENTER to skip/keep): " "${_cur_notebooks_path:-none}" >&2
-            read -r _notebooks_path
-            _notebooks_path="${_notebooks_path:-${_cur_notebooks_path}}"
-
-            if [ -n "$_notebooks_path" ]; then
-                case "$_notebooks_path" in
-                    "~"/*) _notebooks_path="$HOME/${_notebooks_path#\~/}" ;;
-                esac
-                mkdir -p "$_notebooks_path"
-                printf 'NOTEBOOKS_PATH=%s\n' "$_notebooks_path" > "$_notebooks_env"
-                echo "   -> mounting $_notebooks_path at ~/notebooks" >&2
-            else
-                printf '# NOTEBOOKS_PATH=\n' > "$_notebooks_env"
-            fi
             ;;
     esac
 
