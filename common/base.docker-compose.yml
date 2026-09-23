@@ -29,4 +29,7 @@ services:
       - ~/.claude:/home/ubuntu/.claude
       - ~/.claude.json:/home/ubuntu/.claude.json
       - ~/.copilot:/home/ubuntu/.copilot
+      # opencode: config and auth/session state
+      - ~/.config/opencode:/home/ubuntu/.config/opencode
+      - ~/.local/share/opencode:/home/ubuntu/.local/share/opencode
     command: ["sleep", "infinity"]

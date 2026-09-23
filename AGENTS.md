@@ -37,9 +37,10 @@ images and the scripts that build them.
 │   └── agents/                   # Coding-agent CLIs, installed unconditionally on every image
 │       ├── install-agents.sh     # Installs DEFAULT_AGENTS by dispatching to install-<name>.sh below
 │       ├── install-claude.sh     # Claude Code CLI (agent "claude", GPG-signature-verified, pinned)
-│       └── install-copilot.sh    # GitHub Copilot CLI (agent "copilot", checksum-verified, pinned)
+│       ├── install-copilot.sh    # GitHub Copilot CLI (agent "copilot", checksum-verified, pinned)
+│       └── install-opencode.sh   # opencode (agent "opencode", SHA256 from GitHub release digest)
 └── <env>/                        # One folder per environment, each with:
-    ├── Dockerfile                # FROM ubuntu:noble; runs install-common.sh then env scripts
+    ├── Dockerfile                # FROM ubuntu:26.04; runs install-common.sh then env scripts
     ├── docker-compose.yml        # `extends` common base; some tool versions pinned via build args
     ├── devcontainer.json         # VS Code Dev Containers entry point (most envs)
     └── scripts/                  # Env-specific install-*.sh scripts
@@ -94,8 +95,8 @@ images and the scripts that build them.
   would duplicate it. `<env>/devcontainer.json`'s `"service"` field must stay in
   sync with this.
 - `~/.config/gh`, `~/.config/tea/config.yml` are mounted **read-only**; `~/.claude`,
-  `~/.claude.json`, and `~/.copilot` are mounted **read-write** so the agent CLIs can
-  persist session/auth state.
+  `~/.claude.json`, `~/.copilot`, `~/.config/opencode`, and `~/.local/share/opencode` are
+  mounted **read-write** so the agent CLIs can persist session/auth state.
 - Every RUN step whose script calls the GitHub API to resolve a version (`github_latest_stable`
   / `github_latest_matching` in `common/lib/download-utils.sh`) needs
   `--mount=type=secret,id=github_token` on its `RUN` line, and the env's
@@ -103,9 +104,34 @@ images and the scripts that build them.
   block wired into `build.secrets`. Setting `GITHUB_TOKEN` (or `GH_TOKEN`) before running
   `run.sh` raises the unauthenticated 60 req/hr rate limit that build otherwise hits.
 
+## Commands
+
+```sh
+# One-time host setup (git identity, CA bundle, proxy.env, `dev` shell function)
+sh setup.sh
+
+# Interactive launcher — pick an environment + service, opens a zsh shell
+sh run.sh
+sh run.sh -v /path/to/your/project   # mount a different directory into /workspace
+sh run.sh -r                         # force a from-scratch rebuild (--no-cache)
+sh run.sh --debug                    # verbose docker build output (--progress=plain)
+
+# Stop & delete the stack(s) mounted from a directory (containers, networks, anon volumes)
+sh run.sh stop
+sh run.sh stop -v /path/to/your/project
+
+# Manually build/run a single environment without the launcher
+cd <env> && docker compose up -d --build
+docker compose exec -ti <service> zsh
+docker compose down -v               # tear down
+```
+
+There are no linters or test suites to run; validate changes by building the affected
+environment's image (`docker compose build` in that env's directory).
+
 ## Conventions to follow
 
-- **Base images:** `FROM ubuntu:noble`. Final user is `ubuntu` (uid/gid `1000`),
+- **Base images:** `FROM ubuntu:26.04`. Final user is `ubuntu` (uid/gid `1000`),
   workdir `/workspace`, which is the mounted volume.
 - **Install scripts** are POSIX `sh` (`set -eu`), take the version as `$1` with an
   env-var fallback, and **verify downloads** — reuse `download_and_verify` /

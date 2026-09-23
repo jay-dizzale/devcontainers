@@ -54,9 +54,9 @@ its session/auth state.
 
 ### Coding-agent CLIs
 
-**Claude Code** and **GitHub Copilot CLI** are installed on every image, each from a
-pinned, checksum/signature-verified release (`common/agents/install-claude.sh`,
-`common/agents/install-copilot.sh`), dispatched by `common/agents/install-agents.sh`.
+**Claude Code**, **GitHub Copilot CLI** and **opencode** are installed on every image, each
+from a checksum/signature-verified release (`common/agents/install-claude.sh`,
+`common/agents/install-copilot.sh`, `common/agents/install-opencode.sh`), dispatched by `common/agents/install-agents.sh`.
 
 Adding a future agent needs no Dockerfile/docker-compose.yml changes — just a new
 `common/agents/install-<name>.sh` and its id added to `DEFAULT_AGENTS` in

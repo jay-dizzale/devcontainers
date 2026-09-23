@@ -1,4 +1,7 @@
-FROM ubuntu:noble
+FROM ubuntu:26.04
+
+# Build-only: no TTY during docker build, so keep debconf from probing for a frontend
+ARG DEBIAN_FRONTEND=noninteractive
 
 LABEL org.opencontainers.image.authors="jay-dizzale"
 ENV DEVCONTAINER_TYPE=infrastructure-toolbelt

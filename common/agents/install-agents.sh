@@ -17,7 +17,7 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEFAULT_AGENTS="claude,copilot"
+DEFAULT_AGENTS="claude,copilot,opencode"
 
 AGENTS="${AGENTS:-${DEFAULT_AGENTS}}"
 [ -n "${AGENTS}" ] || { echo "No agent CLIs selected — skipping."; exit 0; }
