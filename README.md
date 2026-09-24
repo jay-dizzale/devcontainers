@@ -22,11 +22,12 @@ Ruby, Rust, Go, and Python/`uv`, and adds its own tools on top:
 | `pico-toolbelt` | Raspberry Pi Pico / RP2040 firmware | `arm-none-eabi` GCC toolchain, `pico-sdk`, `pico-extras`, `pico-examples` |
 | `web-toolbelt` | Web / Node.js development | Node.js (incl. npm) |
 
-> By default every tool resolves the **latest stable release** at build time (see
-> `common/scripts/versions.env`) — nothing above is pinned to a fixed version number.
-> To pin one, pass its `<TOOL>_VERSION` build arg in that environment's
-> `docker-compose.yml` (e.g. `JAVA_VERSION`); `RUST_VERSION` is instead read from the environment by `run.sh` when it builds the shared base image; each install script
-> accepts it as `$1`/env-var fallback. Not every tool has that arg wired through yet —
+> By default every tool resolves the **latest stable release** at build time —
+> nothing above is pinned to a fixed version number. To pin one, pass its
+> `<TOOL>_VERSION` build arg in that environment's `docker-compose.yml` (e.g.
+> `JAVA_VERSION`); each install script accepts it as `$1`/env-var fallback.
+> `RUST_VERSION` is the exception: it is read from your shell environment by
+> `run.sh` when it builds the shared base image. Not every tool has that arg wired through yet —
 > check the env's `docker-compose.yml` before assuming one is reachable.
 > The launcher lists `base-toolbelt` first, in its own category, followed by
 > the other five toolbelts alphabetically.
@@ -36,7 +37,7 @@ Ruby, Rust, Go, and Python/`uv`, and adds its own tools on top:
 Everything in `common/` is shared by all environments (`common/base.docker-compose.yml`
 + `common/scripts/install-common.sh`). Every container therefore ships with:
 
-- **Base OS & build tooling** — Ubuntu `noble`, `build-essential`, `make`, `git`,
+- **Base OS & build tooling** — Ubuntu 26.04, `build-essential`, `make`, `git`,
   `curl`/`wget`, `jq`, `unzip`/`zip`, `vim`, `zsh`, plus the common `-dev` headers
   needed to build languages from source.
 - **Ruby** (built from source), **`rustup`** + Rust toolchain, **Go**, and **`uv`**
@@ -44,6 +45,8 @@ Everything in `common/` is shared by all environments (`common/base.docker-compo
   `base-toolbelt`.
 - **`gh`** — GitHub CLI.
 - **`tea`** — Gitea CLI.
+- **`trivy`** — vulnerability scanner.
+- **`shfmt`** — shell formatter.
 - **A preconfigured `zsh`** — history, git config, prompt and a `gitpush` helper
   (`common/.zshrc`). Drop a `.zshrc2` into an environment to extend it.
 
@@ -61,8 +64,6 @@ from a checksum/signature-verified release (`common/agents/install-claude.sh`,
 Adding a future agent needs no Dockerfile/docker-compose.yml changes — just a new
 `common/agents/install-<name>.sh` and its id added to `DEFAULT_AGENTS` in
 `common/agents/install-agents.sh`.
-
-Pinned base versions live in `common/scripts/versions.env`.
 
 ## Preconditions
 
@@ -147,7 +148,7 @@ Open the environment's folder (e.g. `infrastructure-toolbelt/`) in VS Code and c
 ## Configure it
 
 - **Versions** — edit the build `args` in an environment's `docker-compose.yml`
-  (or `common/scripts/versions.env` for base tools).
+  (or export `RUST_VERSION` before running `run.sh` for the base image).
 - **Identity** — `sh setup.sh` generates `common/.zshrc` from
   `common/zshrc-template` with the name/email you give it. `common/.zshrc`
   is gitignored (it holds your real identity); only the template is

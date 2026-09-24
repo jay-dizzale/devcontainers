@@ -9,11 +9,6 @@ LABEL org.opencontainers.image.authors="jay-dizzale"
 LABEL description="Toolbelt environment for Ruby, Rust, Go, and Python (uv) development"
 ENV DEVCONTAINER_TYPE=base-toolbelt
 
-WORKDIR /tmp
-
-## Cleanup
-RUN rm -rf /tmp/*
-
 VOLUME [ "/workspace" ]
 USER ubuntu
 WORKDIR /workspace

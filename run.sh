@@ -32,7 +32,7 @@ Usage:
       Stop & delete every devcontainer stack, from any directory.
 
   run.sh list
-      List every devcontainer stack (project, service, status, workspace).
+      List every devcontainer stack (project, env, service, status, workspace).
 
   run.sh build-base [-r] [--debug]
       Build the shared base image (toolbelt-base:latest) and exit. Only
@@ -331,9 +331,7 @@ COMPOSE_NAMES="$(
     | while IFS= read -r d; do basename "$d"; done
 )"
 
-# shellcheck disable=SC2086
 choice="$(pick_environment)"
-echo "$COMPOSE_DIRS" | grep -q . || die "No projects available."
 
 COMPOSE_DIR="$(echo "$COMPOSE_DIRS" | awk -v n="$choice" 'NR==n{print; exit}')"
 [ -n "$COMPOSE_DIR" ] || die "Invalid selection: $choice"

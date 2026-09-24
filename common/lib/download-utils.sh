@@ -94,21 +94,6 @@ download_and_verify() {
 }
 
 # ---------------------------------------------------------------------------
-# Load environment variables from a file.
-# Arguments:
-#   $1  file  Path to the env file (default: .env)
-# ---------------------------------------------------------------------------
-load_env() {
-    env_file="${1:-.env}"
-    if [ ! -f "$env_file" ]; then
-        echo "ERROR: env file not found: $env_file" >&2
-        return 1
-    fi
-    . "$env_file"
-    echo "OK: Loaded env from $env_file"
-}
-
-# ---------------------------------------------------------------------------
 # wget wrapper for GitHub API calls. Optional — if GITHUB_TOKEN (or GH_TOKEN)
 # is set in the environment, it's sent as a Bearer token to raise the
 # unauthenticated rate limit (60 req/hr per IP, shared by every build).
