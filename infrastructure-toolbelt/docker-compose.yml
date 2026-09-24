@@ -4,7 +4,6 @@ services:
       context: ..
       dockerfile: infrastructure-toolbelt/Dockerfile
       args:
-        RUST_VERSION: ${RUST_VERSION:-stable}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}
@@ -16,6 +15,8 @@ services:
     extends:
       file: ../common/base.docker-compose.yml
       service: base
+    labels:
+      - "devcontainer.env=infrastructure-toolbelt"
     volumes:
       - ./.zshrc2:/home/ubuntu/.zshrc2
       - ~/.aws/:/home/ubuntu/.aws

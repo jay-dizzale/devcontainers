@@ -54,6 +54,7 @@ localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 sh install-gh.sh
 sh install-tea.sh
 sh install-trivy.sh
+sh install-shfmt.sh
 
 ## Ruby, Go, and uv (Python) are part of the common base so every toolbelt
 ## gets them, not just base-toolbelt. The dev headers above (libssl-dev,

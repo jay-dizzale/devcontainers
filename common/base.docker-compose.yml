@@ -3,22 +3,30 @@ services:
     init: true
     user: 1000:1000
     labels:
-      # Identifies which host directory + environment started this stack.
-      # run.sh matches on these (not the project name) to find an existing
-      # stack to reconnect to, since project names are now random and no
-      # longer encode the path.
+      # Identifies which host directory started this stack. The matching
+      # `devcontainer.env=<toolbelt>` label is set per environment in
+      # <env>/docker-compose.yml, and doubles as the marker that says "this
+      # container belongs to this project". run.sh matches on these (not the
+      # project name) to find/list/stop stacks, since project names are
+      # random and encode nothing.
       - "devcontainer.workspace=${VOLUME:-../..}"
-      - "devcontainer.env=${DEVCONTAINER_ENV:-}"
     environment:
       - LANG=en_US.UTF-8
       - LANGUAGE=en_US:en
       - LC_ALL=en_US.UTF-8
+      # Claude Code is pinned and installed root-owned in /usr/local/bin
+      # (see common/agents/install-claude.sh); self-update can only fail there.
+      - DISABLE_AUTOUPDATER=1
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=${NO_PROXY:-}
       - http_proxy=${http_proxy:-}
       - https_proxy=${https_proxy:-}
       - no_proxy=${no_proxy:-}
+      # Ollama on the host (needs OLLAMA_HOST=0.0.0.0 there); used by ~/.config/opencode.
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../common/.zshrc:/home/ubuntu/.zshrc:ro
       - ../common/.history:/home/ubuntu/.history

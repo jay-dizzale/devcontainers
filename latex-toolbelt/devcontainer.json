@@ -9,6 +9,7 @@
 	"customizations": {
 		"vscode": {
 			"extensions": [
+				"mkhl.shfmt",
 				"alefragnani.Bookmarks",
 				"github.vscode-github-actions",
 				"mhutchie.git-graph",

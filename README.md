@@ -25,7 +25,7 @@ Ruby, Rust, Go, and Python/`uv`, and adds its own tools on top:
 > By default every tool resolves the **latest stable release** at build time (see
 > `common/scripts/versions.env`) — nothing above is pinned to a fixed version number.
 > To pin one, pass its `<TOOL>_VERSION` build arg in that environment's
-> `docker-compose.yml` (e.g. `JAVA_VERSION`, `RUST_VERSION`); each install script
+> `docker-compose.yml` (e.g. `JAVA_VERSION`); `RUST_VERSION` is instead read from the environment by `run.sh` when it builds the shared base image; each install script
 > accepts it as `$1`/env-var fallback. Not every tool has that arg wired through yet —
 > check the env's `docker-compose.yml` before assuming one is reachable.
 > The launcher lists `base-toolbelt` first, in its own category, followed by
@@ -95,13 +95,14 @@ You'll be prompted to:
 
 The same host directory + environment always reconnects to the same stack, so
 re-running `run.sh` picks up your existing container instead of rebuilding.
-The project name is `<env>-<hash of the full absolute workspace path>` rather
-than the old `<env>_<parent-dir>_<current-dir>` scheme, so two different
-directories that happen to share their last path segments (e.g.
-`.../alice/myapp` and `.../bob/myapp`) never collide. Each stack is also
-labelled with its exact workspace path and environment
-(`devcontainer.workspace`/`devcontainer.env` in `common/base.docker-compose.yml`)
-for identification. Exiting the shell does **not** stop or
+The project name is random (`dev-<8 hex>`) and encodes nothing; stacks are
+identified by labels instead: `devcontainer.env` (the toolbelt, set in each
+`<env>/docker-compose.yml`) and `devcontainer.workspace` (the exact host
+directory, set in `common/base.docker-compose.yml`). `run.sh` looks up an
+existing stack by those two labels and reuses its project name, so two
+directories that share their last path segments never collide. The
+`devcontainer.env` label is also how `run.sh list`/`stop` recognise a
+container as belonging to this project. Exiting the shell does **not** stop or
 delete the stack — it keeps running so reconnecting is instant. Use
 `sh run.sh stop` (below) when you actually want to tear it down.
 
@@ -113,8 +114,8 @@ sh run.sh stop -v /path/to/project
 sh run.sh stop --all               # tear down every devcontainer stack, from any directory
 ```
 
-This finds every container whose `/workspace` mount points at that directory (or,
-with `--all`, every container with a `/workspace` mount at all) and runs
+Among containers carrying the `devcontainer.env` label, this finds those whose
+`/workspace` mount points at that directory (or, with `--all`, all of them) and runs
 `docker compose down -v` for each matching stack (containers, networks and
 anonymous volumes removed).
 
@@ -124,8 +125,19 @@ anonymous volumes removed).
 sh run.sh list
 ```
 
-Shows every devcontainer stack (project, service, status, mounted workspace
+Shows every devcontainer stack (project, env, service, status, mounted workspace
 directory), regardless of which directory it was started from.
+
+### Build only the shared base image
+
+```sh
+sh run.sh build-base        # build/refresh toolbelt-base:latest, then exit
+sh run.sh build-base -r     # force a from-scratch rebuild
+```
+
+The base is local-only (never pushed) and is rebuilt automatically only when
+`common/` (or `RUST_VERSION`) changed. Run this once before using an
+environment from VS Code "Reopen in Container", which doesn't go through `run.sh`.
 
 ## Run it (VS Code / DevContainers)
 

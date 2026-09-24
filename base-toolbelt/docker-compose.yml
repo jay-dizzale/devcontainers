@@ -3,11 +3,12 @@ services:
     extends:
       file: ../common/base.docker-compose.yml
       service: base
+    labels:
+      - "devcontainer.env=base-toolbelt"
     build:
       context: ..
       dockerfile: base-toolbelt/Dockerfile
       args:
-        RUST_VERSION: ${RUST_VERSION:-stable}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}

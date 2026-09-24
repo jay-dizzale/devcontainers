@@ -1,0 +1,7 @@
+# Compose override applied only by run.sh (via COMPOSE_FILE): names the
+# container after the project (`dev-<8 hex>`) instead of `<project>-dev-1`.
+# Not part of the toolbelts' own compose files, so VS Code / devcontainer.json
+# keeps compose's default naming.
+services:
+  dev:
+    container_name: ${COMPOSE_PROJECT_NAME}
