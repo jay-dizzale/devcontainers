@@ -14,17 +14,12 @@ services:
       - LANG=en_US.UTF-8
       - LANGUAGE=en_US:en
       - LC_ALL=en_US.UTF-8
-      # Claude Code is pinned and installed root-owned in /usr/local/bin
-      # (see common/agents/install-claude.sh); self-update can only fail there.
-      - DISABLE_AUTOUPDATER=1
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=${NO_PROXY:-}
       - http_proxy=${http_proxy:-}
       - https_proxy=${https_proxy:-}
       - no_proxy=${no_proxy:-}
-      # Ollama on the host (needs OLLAMA_HOST=0.0.0.0 there); used by ~/.config/opencode.
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -33,11 +28,4 @@ services:
       - ${VOLUME:-../..}:/workspace
       - ~/.config/tea/config.yml:/home/ubuntu/.config/tea/config.yml:ro
       - ~/.config/gh:/home/ubuntu/.config/gh:ro
-      # Claude Code writes session/auth state back to these — must stay RW.
-      - ~/.claude:/home/ubuntu/.claude
-      - ~/.claude.json:/home/ubuntu/.claude.json
-      - ~/.copilot:/home/ubuntu/.copilot
-      # opencode: config and auth/session state
-      - ~/.config/opencode:/home/ubuntu/.config/opencode
-      - ~/.local/share/opencode:/home/ubuntu/.local/share/opencode
     command: ["sleep", "infinity"]

@@ -52,18 +52,6 @@ Everything in `common/` is shared by all environments (`common/base.docker-compo
 
 The base also mounts useful host config **read-only** into the container
 (`~/.config/gh`, `~/.config/tea/config.yml`) and your **workspace** at `/workspace`.
-`~/.claude` and `~/.claude.json` are mounted **read-write** so Claude Code can persist
-its session/auth state.
-
-### Coding-agent CLIs
-
-**Claude Code**, **GitHub Copilot CLI** and **opencode** are installed on every image, each
-from a checksum/signature-verified release (`common/agents/install-claude.sh`,
-`common/agents/install-copilot.sh`, `common/agents/install-opencode.sh`), dispatched by `common/agents/install-agents.sh`.
-
-Adding a future agent needs no Dockerfile/docker-compose.yml changes — just a new
-`common/agents/install-<name>.sh` and its id added to `DEFAULT_AGENTS` in
-`common/agents/install-agents.sh`.
 
 ## Preconditions
 

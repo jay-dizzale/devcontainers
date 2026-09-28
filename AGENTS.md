@@ -22,7 +22,7 @@ images and the scripts that build them.
 ├── run.sh                        # Interactive launcher: pick an env + service, opens a zsh shell
 ├── setup.sh                      # One-time host setup: git identity, CA bundle, proxy.env, `dev` shell function
 ├── common/                       # Shared base for every environment
-│   ├── Dockerfile                # Shared base image `toolbelt-base:latest` (install-common + agents + Rust), built locally by run.sh
+│   ├── Dockerfile                # Shared base image `toolbelt-base:latest` (install-common + Rust), built locally by run.sh
 │   ├── base.docker-compose.yml   # Base compose service (mounts, env, user) that others `extend`
 │   ├── container-name.docker-compose.yml  # run.sh-only override: container_name = project name
 │   ├── zshrc-template             # Checked-in template (no real identity) for common/.zshrc
@@ -35,12 +35,7 @@ images and the scripts that build them.
 │   │   ├── install-shfmt.sh      # shfmt (shell formatter, checksum-verified)
 │   │   ├── install-ruby.sh       # Ruby, built from source
 │   │   ├── install-go.sh         # Go (+ Delve debugger)
-│   │   ├── install-uv.sh         # uv (Python version/venv manager)
-│   └── agents/                   # Coding-agent CLIs, installed unconditionally on every image
-│       ├── install-agents.sh     # Installs DEFAULT_AGENTS by dispatching to install-<name>.sh below
-│       ├── install-claude.sh     # Claude Code CLI (agent "claude", GPG-signature-verified, pinned)
-│       ├── install-copilot.sh    # GitHub Copilot CLI (agent "copilot", checksum-verified, pinned)
-│       └── install-opencode.sh   # opencode (agent "opencode", SHA256 from GitHub release digest)
+│   │   └── install-uv.sh         # uv (Python version/venv manager)
 └── <env>/                        # One folder per environment, each with:
     ├── Dockerfile                # FROM toolbelt-base:latest; runs only the env's own install scripts
     ├── docker-compose.yml        # `extends` common base; some tool versions pinned via build args
@@ -56,7 +51,7 @@ images and the scripts that build them.
 - Each `<env>/Dockerfile` uses **build context `..`** (the repo root), so it can `ADD`
   from both `common/` and the env folder. Keep that in mind when adding `ADD`/`COPY` paths.
 - **The shared base is a local image, never pushed.** `common/Dockerfile` builds
-  `toolbelt-base:latest` (`install-common.sh`, `install-agents.sh`, the Rust toolchain;
+  `toolbelt-base:latest` (`install-common.sh`, the Rust toolchain;
   ends as `root`). Every `<env>/Dockerfile` is `FROM ${BASE_IMAGE}` (default
   `toolbelt-base:latest`), runs its own `install-*.sh`, cleans `/tmp`, and ends with
   `USER ubuntu`. `run.sh` (`ensure_base_image`) builds the base when it is missing, when
@@ -95,9 +90,7 @@ images and the scripts that build them.
   `common/container-name.docker-compose.yml` override (applied via `COMPOSE_FILE`, so
   VS Code keeps compose's default `<project>-dev-1` naming). `<env>/devcontainer.json`'s `"service"` field must stay in
   sync with this.
-- `~/.config/gh`, `~/.config/tea/config.yml` are mounted **read-only**; `~/.claude`,
-  `~/.claude.json`, `~/.copilot`, `~/.config/opencode`, and `~/.local/share/opencode` are
-  mounted **read-write** so the agent CLIs can persist session/auth state.
+- `~/.config/gh`, `~/.config/tea/config.yml` are mounted **read-only**.
 - Every RUN step whose script calls the GitHub API to resolve a version (`github_latest_stable`
   / `github_latest_matching` in `common/lib/download-utils.sh`) needs
   `--mount=type=secret,id=github_token` on its `RUN` line, and the env's
@@ -159,20 +152,15 @@ environment's image (`docker compose build` in that env's directory).
    changes needed.
 4. Add a row to the **Available environments** table in `README.md`.
 
-## Adding a new coding-agent CLI
-
-1. Drop a `common/agents/install-<id>.sh` script (same conventions as the others:
-   pinned version, checksum/signature verification).
-2. Add its id to `DEFAULT_AGENTS` in `common/agents/install-agents.sh`.
-
-No Dockerfile or docker-compose.yml changes are needed — every image already runs
-`install-agents.sh` unconditionally.
-
 ## Guardrails
 
 - **Do not commit secrets or credentials.** Host secrets (`~/.aws`, `~/.azure`,
-  `~/.terraform.d`, `~/.spacelift`, `~/.m2`, gh/tea config, `~/.claude*`, `~/.copilot`)
+  `~/.terraform.d`, `~/.spacelift`, `~/.m2`, gh/tea config)
   are provided at **runtime via volume mounts**, never baked into images.
+- **Do not add coding-agent CLIs (Claude Code, Copilot CLI, opencode, etc.) back
+  into the images** — no install scripts, no `~/.claude`/`~/.copilot`/`~/.config/opencode`-style
+  volume mounts. These environments intentionally run without agent binaries or
+  agent state mounted in.
 - **Do not run `docker compose down -v`, `docker system prune`, or delete images/volumes**
   unless the user explicitly asks — these destroy running environments and state.
 - **Do not bump pinned versions unprompted.** Version changes are deliberate.

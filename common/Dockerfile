@@ -9,10 +9,8 @@ LABEL description="Shared base image for every toolbelt (built locally by run.sh
 ## Install common tools (includes Ruby, Go, and uv — see common/scripts/install-common.sh)
 ADD ./common/lib/ /usr/local/lib/shell/
 ADD ./common/scripts/ /tmp/
-ADD ./common/agents/ /tmp/agents/
 WORKDIR /tmp
 RUN --mount=type=secret,id=github_token sh /tmp/install-common.sh
-RUN --mount=type=secret,id=github_token sh /tmp/agents/install-agents.sh
 
 ## Cleanup
 RUN rm -rf /tmp/*

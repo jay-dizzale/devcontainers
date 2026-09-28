@@ -225,7 +225,7 @@ BASE_IMAGE="toolbelt-base:latest"   # keep in sync with ARG BASE_IMAGE in <env>/
 ensure_base_image() {
     _hash="$(
         cd "$SCRIPT_DIR" &&
-        { find common/Dockerfile common/lib common/scripts common/agents -type f \
+        { find common/Dockerfile common/lib common/scripts -type f \
             | LC_ALL=C sort | xargs sha256sum; printf 'RUST_VERSION=%s\n' "${RUST_VERSION:-stable}"; } \
         | sha256sum | cut -c1-16
     )"

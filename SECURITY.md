@@ -33,7 +33,7 @@ reports will be acknowledged and addressed as soon as reasonably possible.
 
 In scope:
 
-- `common/scripts/*.sh`, `common/agents/*.sh`, `common/lib/download-utils.sh`,
+- `common/scripts/*.sh`, `common/lib/download-utils.sh`,
   and every `<env>/scripts/*.sh` — especially anything that downloads and
   executes/installs a binary without verifying a checksum or signature.
 - `Dockerfile` / `docker-compose.yml` in any environment — build-arg or

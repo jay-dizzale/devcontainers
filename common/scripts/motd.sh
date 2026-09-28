@@ -97,8 +97,6 @@ _tool "spacectl"       spacectl version
 _tool "gh"             gh --version
 _tool "tea"            tea --version
 _tool "trivy"          trivy --version
-_tool "claude"         claude --version
-_tool "copilot"        copilot --version
 _tool "git"            git --version
 
 # Kafka — version lives in the client jar filename (no subprocess needed)
