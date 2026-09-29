@@ -35,7 +35,10 @@ images and the scripts that build them.
 │   │   ├── install-shfmt.sh      # shfmt (shell formatter, checksum-verified)
 │   │   ├── install-ruby.sh       # Ruby, built from source
 │   │   ├── install-go.sh         # Go (+ Delve debugger)
-│   │   └── install-uv.sh         # uv (Python version/venv manager)
+│   │   ├── install-uv.sh         # uv (Python version/venv manager)
+│   │   ├── install-trivy.sh      # Trivy (vulnerability/misconfig scanner)
+│   │   ├── motd.sh               # Installed as /usr/local/bin/motd by install-common.sh
+│   │   └── certs/                # Drop corporate CA certs here (contents gitignored)
 └── <env>/                        # One folder per environment, each with:
     ├── Dockerfile                # FROM toolbelt-base:latest; runs only the env's own install scripts
     ├── docker-compose.yml        # `extends` common base; some tool versions pinned via build args
@@ -113,15 +116,23 @@ sh run.sh --debug                    # verbose docker build output (--progress=p
 # Build only the shared base image (toolbelt-base:latest), then exit
 sh run.sh build-base [-r]
 
+# List every devcontainer stack (project, env, service, status, workspace)
+sh run.sh list
+
 # Stop & delete the stack(s) mounted from a directory (containers, networks, anon volumes)
 sh run.sh stop
 sh run.sh stop -v /path/to/your/project
+sh run.sh stop --all                 # every devcontainer stack, from any directory
 
 # Manually build/run a single environment without the launcher
+# (the base image must exist first: `sh run.sh build-base`)
 cd <env> && docker compose up -d --build
-docker compose exec -ti <service> zsh
+docker compose exec -ti dev zsh      # the service is always named `dev`
 docker compose down -v               # tear down
 ```
+
+After `setup.sh`, all `run.sh` subcommands are also available as `dev ...`
+(e.g. `dev list`, `dev stop --all`).
 
 There are no linters or test suites to run; validate changes by building the affected
 environment's image (`docker compose build` in that env's directory).
