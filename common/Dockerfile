@@ -24,3 +24,10 @@ ENV PATH="/home/ubuntu/.cargo/bin:${PATH}"
 ## Toolbelts layer on top of this and need root for their own install scripts;
 ## each one switches back to `ubuntu` at the end.
 USER root
+
+## Entrypoint: sets up the egress-enforcing iptables allowlist (needs root +
+## NET_ADMIN — see common/base.docker-compose.yml), then drops to uid 1000
+## for good before exec'ing the real command. See common/entrypoint.sh.
+COPY common/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

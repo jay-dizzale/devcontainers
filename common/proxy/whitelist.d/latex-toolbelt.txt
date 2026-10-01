@@ -1,0 +1,9 @@
+# latex-toolbelt
+#
+# texlive-full is installed entirely via apt, already covered by
+# 00-common.txt's Ubuntu mirrors — nothing else is needed by default.
+#
+# If you use `tlmgr` to install/update packages outside apt, uncomment (or
+# add) the CTAN mirror(s) you need, e.g.:
+# mirror.ctan.org
+# ctan.org

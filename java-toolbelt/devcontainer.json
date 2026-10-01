@@ -3,7 +3,7 @@
 {
 	"name": "java-toolbelt",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"dockerComposeFile": "docker-compose.yml",
+	"dockerComposeFile": ["docker-compose.yml", "../common/proxy.docker-compose.yml"],
 	"service": "dev",
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"workspaceFolder": "/workspace",

@@ -53,6 +53,35 @@ Everything in `common/` is shared by all environments (`common/base.docker-compo
 The base also mounts useful host config **read-only** into the container
 (`~/.config/gh`, `~/.config/tea/config.yml`) and your **workspace** at `/workspace`.
 
+## Egress proxy and domain whitelist
+
+Every container's runtime network traffic is forced through a Squid proxy sidecar that only
+allows a whitelisted set of domains — anything else is denied, and every connection (allowed
+or denied) is logged. This is enforced by iptables rules set inside the container itself at
+startup (dropping all outbound traffic except to the proxy), not just by setting `HTTP_PROXY`
+— a process that ignores those env vars still can't reach the internet directly.
+
+- **Something you need got blocked?** Check `sh run.sh logs` (or `dev logs`) for the denied
+  domain, then add
+  it to `common/proxy/whitelist.d/<env>-toolbelt.txt` (grouped by the environment that needs
+  it, though every environment's proxy loads the whole `whitelist.d/` directory) or
+  `common/proxy/whitelist.d/00-common.txt` if it's needed everywhere. Apply the change with
+  `docker compose restart proxy` (from the environment's directory) — edits only take effect on
+  the next start.
+- **Filtering is domain-level, not a man-in-the-middle** — Squid reads the domain from the
+  `CONNECT` request for HTTPS (or the request host for plain HTTP) and either tunnels the
+  connection untouched or denies it. It never decrypts traffic, so no certificate needs to be
+  installed and certificate pinning keeps working.
+- **This governs the running container, not the image build.** `docker compose build` still
+  uses `proxy.env` (below) if you've set one, unaffected by the whitelist.
+- If `proxy.env` configures a corporate proxy, the whitelist proxy chains to it automatically —
+  the two aren't mutually exclusive.
+- **Live dashboard** — run `docker compose port proxy 8080` (from the environment's
+  directory) for the actual host port, then open `http://127.0.0.1:<port>/report.html` in a
+  browser for a live-updating view of every allowed/denied connection.
+
+See [`AGENTS.md`](AGENTS.md#egress-proxy-and-domain-whitelist) for the full architecture.
+
 ## Preconditions
 
 - Docker (with the Compose plugin) and a container runtime.
@@ -117,6 +146,17 @@ sh run.sh list
 Shows every devcontainer stack (project, env, service, status, mounted workspace
 directory), regardless of which directory it was started from.
 
+### View the egress proxy's access log
+
+```sh
+sh run.sh logs                    # last 50 lines, for the stack mounted from the current directory
+sh run.sh logs -f                 # follow it live
+sh run.sh logs -v /path/to/project
+```
+
+Shows every allowed and denied connection Squid has logged. Prompts to pick a stack if more
+than one is running from that directory.
+
 ### Build only the shared base image
 
 ```sh
@@ -158,7 +198,8 @@ Open the environment's folder (e.g. `infrastructure-toolbelt/`) in VS Code and c
 
 ```sh
 exit                 # if you're inside the container shell
-docker compose down  # from the environment's directory, to remove the stack
+sh run.sh stop       # or, from the environment's directory (same -f files it was started with):
+docker compose -f docker-compose.yml -f ../common/proxy.docker-compose.yml down -v
 ```
 
 ## For AI assistants

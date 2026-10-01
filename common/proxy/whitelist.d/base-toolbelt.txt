@@ -1,0 +1,6 @@
+# base-toolbelt has no install scripts of its own beyond the shared base
+# (see 00-common.txt), but its focus languages need these at runtime:
+
+# Python packaging (uv / pip)
+pypi.org
+files.pythonhosted.org

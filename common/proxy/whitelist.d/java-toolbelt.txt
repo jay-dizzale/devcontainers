@@ -1,0 +1,10 @@
+# java-toolbelt
+
+# Amazon Corretto JDK
+corretto.aws
+
+# Maven Central (dependency resolution) + Apache mirrors (Maven binary itself)
+repo.maven.apache.org
+dlcdn.apache.org
+archive.apache.org
+downloads.apache.org

@@ -1,7 +1,17 @@
 services:
   base:
     init: true
-    user: 1000:1000
+    # root, not 1000:1000: the entrypoint (common/entrypoint.sh) needs root +
+    # NET_ADMIN to set up the egress iptables allowlist, then drops to uid
+    # 1000 itself before exec'ing `command` below. `docker compose exec`
+    # must pass `-u ubuntu` explicitly from here on (see run.sh) — the
+    # container's own default user is now root.
+    user: root
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      proxy:
+        condition: service_healthy
     labels:
       # Identifies which host directory started this stack. The matching
       # `devcontainer.env=<toolbelt>` label is set per environment in
@@ -14,12 +24,17 @@ services:
       - LANG=en_US.UTF-8
       - LANGUAGE=en_US:en
       - LC_ALL=en_US.UTF-8
-      - HTTP_PROXY=${HTTP_PROXY:-}
-      - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=${NO_PROXY:-}
-      - http_proxy=${http_proxy:-}
-      - https_proxy=${https_proxy:-}
-      - no_proxy=${no_proxy:-}
+      # Every runtime HTTP/HTTPS request goes through the whitelist-enforcing
+      # proxy sidecar (common/proxy.docker-compose.yml) — enforced by the
+      # iptables allowlist in common/entrypoint.sh, not just by setting these.
+      # Unrelated to the proxy.env-based HTTP_PROXY/HTTPS_PROXY build args
+      # used for the image *build* in every <env>/docker-compose.yml.
+      - HTTP_PROXY=http://proxy:3128
+      - HTTPS_PROXY=http://proxy:3128
+      - NO_PROXY=localhost,127.0.0.1,host.docker.internal
+      - http_proxy=http://proxy:3128
+      - https_proxy=http://proxy:3128
+      - no_proxy=localhost,127.0.0.1,host.docker.internal
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

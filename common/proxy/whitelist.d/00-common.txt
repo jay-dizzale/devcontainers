@@ -1,0 +1,44 @@
+# Domains needed by the shared base (common/) — installed in every environment.
+# One domain per line; # comments and blank lines are ignored.
+
+# Ubuntu package mirrors (archive.*/security.* on amd64, ports.* on arm64)
+archive.ubuntu.com
+security.ubuntu.com
+ports.ubuntu.com
+
+# GitHub — git clone/fetch over HTTPS, gh CLI, and release-asset downloads
+# used by several install scripts and everyday dev work
+github.com
+api.github.com
+raw.githubusercontent.com
+codeload.github.com
+objects.githubusercontent.com
+github-releases.githubusercontent.com
+github-cloud.githubusercontent.com
+
+# Gitea CLI (tea)
+gitea.com
+dl.gitea.com
+
+# Trivy — pulls its vulnerability DB from GitHub Container Registry at scan
+# time, not just at install time
+ghcr.io
+pkg-containers.githubusercontent.com
+
+# Ruby (built from source) + RubyGems at runtime
+cache.ruby-lang.org
+bugs.ruby-lang.org
+rubygems.org
+index.rubygems.org
+
+# Go toolchain + module proxy/checksum database
+go.dev
+dl.google.com
+proxy.golang.org
+sum.golang.org
+
+# Rust toolchain updates + crates.io
+static.rust-lang.org
+crates.io
+static.crates.io
+index.crates.io

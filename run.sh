@@ -4,6 +4,7 @@
 #        run.sh stop [-v /path/to/mount]   — stop & delete stacks mounted from that dir
 #        run.sh stop --all                 — stop & delete every devcontainer stack
 #        run.sh list                       — list every devcontainer stack
+#        run.sh logs [-v /path/to/mount] [-f]  — view/tail the egress proxy's access log
 #        run.sh build-base [-r]            — build (or refresh) the shared base image only
 
 set -eu
@@ -15,6 +16,22 @@ INVOCATION_DIR="$(pwd)"
 # Helpers
 # ---------------------------------------------------------------------------
 die() { echo "❌ ERROR: $*" >&2; exit 1; }
+
+# Moved up from near the interactive flow further down so early-dispatch
+# subcommands (e.g. `logs`) can use it too — it has no dependencies on
+# anything defined later in this file.
+pick_from_list() {
+    label="$1"; shift
+    echo "${label}:" >&2
+    i=1
+    for item do
+        printf "  [%s] %s\n" "$i" "$item" >&2
+        i=$((i + 1))
+    done
+    printf "Select: " >&2
+    read -r choice
+    echo "$choice"
+}
 
 cmd_help() {
     cat <<'EOF'
@@ -34,6 +51,11 @@ Usage:
   run.sh list
       List every devcontainer stack (project, env, service, status, workspace).
 
+  run.sh logs [-v /path/to/mount] [-f]
+      Show the whitelist proxy's access log (allowed + denied domains) for
+      the stack mounted from that directory (default: cwd). -f follows it
+      live; prompts if more than one stack is running from that directory.
+
   run.sh build-base [-r] [--debug]
       Build the shared base image (toolbelt-base:latest) and exit. Only
       rebuilds if common/ changed since it was last built; -r forces a
@@ -45,6 +67,7 @@ Usage:
 Options:
   -v, --volume <path>   Directory to mount at /workspace (default: cwd).
   -r, --rebuild         Force a from-scratch rebuild (--no-cache).
+  -f, --follow          With `logs`, follow the access log instead of a one-shot view.
   --debug               Verbose docker build output (--progress=plain).
 
 If installed via setup.sh, all of the above also work as `dev ...`
@@ -150,12 +173,70 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# `logs` subcommand — tail (or one-shot view) the whitelist proxy's access
+# log for the stack mounted from the given directory (default: cwd). If
+# more than one stack is running from that directory, prompts to pick one.
+# ---------------------------------------------------------------------------
+cmd_logs() {
+    target="$1"; follow="$2"
+    echo "🔍 Looking for containers mounted from: $target"
+
+    candidates="$(docker ps -a -q --filter "label=devcontainer.env" 2>/dev/null || true)"
+    [ -n "$candidates" ] || die "No devcontainer stacks found."
+
+    matches=""
+    for cid in $candidates; do
+        src="$(docker inspect "$cid" --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
+        [ "$src" = "$target" ] && matches="$matches $cid"
+    done
+    [ -n "$matches" ] || die "No containers mounted from $target."
+
+    proj_env_list="$(
+        for cid in $matches; do
+            docker inspect "$cid" --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "devcontainer.env"}}'
+        done | sort -u
+    )"
+
+    count="$(echo "$proj_env_list" | wc -l)"
+    if [ "$count" -eq 1 ]; then
+        chosen="$proj_env_list"
+    else
+        envs="$(echo "$proj_env_list" | cut -d'|' -f2)"
+        # shellcheck disable=SC2086
+        idx="$(pick_from_list "🐳 Multiple stacks running from this directory" $envs)"
+        chosen="$(echo "$proj_env_list" | awk -v n="$idx" 'NR==n{print; exit}')"
+        [ -n "$chosen" ] || die "Invalid selection: $idx"
+    fi
+
+    proj="$(echo "$chosen" | cut -d'|' -f1)"
+    env="$(echo "$chosen" | cut -d'|' -f2)"
+
+    proxy_cid="$(docker ps -q \
+        --filter "label=com.docker.compose.project=${proj}" \
+        --filter "label=com.docker.compose.service=proxy" 2>/dev/null | head -n 1)"
+    [ -n "$proxy_cid" ] || die "No running 'proxy' container found for stack '$proj' ($env)."
+
+    # No -t: tail doesn't need a TTY, and this way `logs` also works when
+    # run.sh's own stdin/stdout aren't a terminal (e.g. piped/scripted).
+    if [ "$follow" = "1" ]; then
+        echo "📜 Tailing access log for '$env' (project $proj) — Ctrl-C to stop ..."
+        docker exec -i "$proxy_cid" tail -n 50 -f /var/log/squid/access.log
+    else
+        echo "📜 Access log for '$env' (project $proj):"
+        docker exec -i "$proxy_cid" tail -n 50 /var/log/squid/access.log
+    fi
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
 # Arguments  (-v defaults to the directory run.sh was called from)
 # ---------------------------------------------------------------------------
 STOP=0
 BUILD_BASE=0
 STOP_ALL=0
 LIST=0
+LOGS=0
+FOLLOW=0
 VOLUME="$INVOCATION_DIR"
 REBUILD=0
 DEBUG=0
@@ -164,12 +245,14 @@ while [ $# -gt 0 ]; do
         -h|--help|help) cmd_help ;;
         stop)         STOP=1;    shift ;;
         list)         LIST=1;    shift ;;
+        logs)         LOGS=1;    shift ;;
         build-base)   BUILD_BASE=1; shift ;;
         --all)        STOP_ALL=1; shift ;;
         -v|--volume)
             [ $# -ge 2 ] || die "--volume requires a value"
             VOLUME="$2"; shift 2 ;;
         -r|--rebuild) REBUILD=1; shift ;;
+        -f|--follow)  FOLLOW=1;  shift ;;
         --debug)      DEBUG=1;   shift ;;
         *) die "Unknown argument: $1" ;;
     esac
@@ -179,6 +262,10 @@ export VOLUME
 
 if [ "$LIST" = "1" ]; then
     cmd_list
+fi
+
+if [ "$LOGS" = "1" ]; then
+    cmd_logs "$VOLUME" "$FOLLOW"
 fi
 
 if [ "$STOP_ALL" = "1" ]; then
@@ -225,7 +312,7 @@ BASE_IMAGE="toolbelt-base:latest"   # keep in sync with ARG BASE_IMAGE in <env>/
 ensure_base_image() {
     _hash="$(
         cd "$SCRIPT_DIR" &&
-        { find common/Dockerfile common/lib common/scripts -type f \
+        { find common/Dockerfile common/entrypoint.sh common/lib common/scripts -type f \
             | LC_ALL=C sort | xargs sha256sum; printf 'RUST_VERSION=%s\n' "${RUST_VERSION:-stable}"; } \
         | sha256sum | cut -c1-16
     )"
@@ -265,19 +352,6 @@ fi
 # gitignored, so it won't exist yet on a fresh clone.
 # ---------------------------------------------------------------------------
 [ -f "$SCRIPT_DIR/common/.zshrc" ] || die "common/.zshrc not found — run 'sh setup.sh' first."
-
-pick_from_list() {
-    label="$1"; shift
-    echo "${label}:" >&2
-    i=1
-    for item do
-        printf "  [%s] %s\n" "$i" "$item" >&2
-        i=$((i + 1))
-    done
-    printf "Select: " >&2
-    read -r choice
-    echo "$choice"
-}
 
 pick_environment() {
     echo "==================== Base environment ====================" >&2
@@ -361,7 +435,7 @@ if [ -z "$COMPOSE_PROJECT_NAME" ]; then
 fi
 export COMPOSE_PROJECT_NAME
 # Name the container after the project (see the override file for why it is run.sh-only).
-export COMPOSE_FILE="docker-compose.yml:${SCRIPT_DIR}/common/container-name.docker-compose.yml"
+export COMPOSE_FILE="docker-compose.yml:${SCRIPT_DIR}/common/proxy.docker-compose.yml:${SCRIPT_DIR}/common/container-name.docker-compose.yml"
 
 ensure_base_image
 
@@ -413,9 +487,12 @@ cleanup() {
 }
 
 # ---------------------------------------------------------------------------
-# Select service
+# Select service — `proxy` (from common/proxy.docker-compose.yml) is
+# infrastructure, not a shell target: exclude it so environments with a
+# single `dev` service still auto-select it, same as before the proxy was
+# merged in.
 # ---------------------------------------------------------------------------
-SERVICES="$(docker compose config --services)" || die "Failed to list services."
+SERVICES="$(docker compose config --services | grep -v '^proxy$')" || die "Failed to list services."
 [ -n "$SERVICES" ] || die "No services defined in compose file."
 
 SVC_COUNT="$(echo "$SERVICES" | wc -l)"
@@ -442,7 +519,10 @@ fi
 # Open shell
 # ---------------------------------------------------------------------------
 echo "🚀 Opening zsh in service '${SERVICE}' …"
-docker compose exec -ti "$SERVICE" zsh
+# -u ubuntu: the container's default user is root (base.docker-compose.yml's
+# entrypoint needs root briefly to set up the egress iptables rules before
+# dropping privileges itself) — without this, exec would land as root too.
+docker compose exec -ti -u ubuntu "$SERVICE" zsh
 
 echo
 echo "👋 Shell exited — the stack is still running."

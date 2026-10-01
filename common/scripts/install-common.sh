@@ -21,6 +21,7 @@ apt-get install -qqy apt-transport-https \
   gnupg \
   gpg \
   gpg \
+  iptables \
   jq \
   libbz2-dev \
   libffi-dev \

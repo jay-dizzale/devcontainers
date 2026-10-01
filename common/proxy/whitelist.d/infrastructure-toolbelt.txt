@@ -1,0 +1,31 @@
+# infrastructure-toolbelt
+
+# Azure CLI — apt repo + install script, then actually using it (login,
+# resource calls)
+packages.microsoft.com
+aka.ms
+management.azure.com
+login.microsoftonline.com
+graph.microsoft.com
+
+# AWS CLI + SSM plugin, then actually using it: AWS service APIs are spread
+# across many *.amazonaws.com subdomains (STS, EC2, S3, ...) — the leading
+# dot matches the whole family, same dstdomain syntax Squid uses natively.
+awscli.amazonaws.com
+s3.amazonaws.com
+.amazonaws.com
+
+# Terraform/OpenTofu (tenv) + provider registry
+registry.terraform.io
+releases.hashicorp.com
+checkpoint-api.hashicorp.com
+
+# Spacelift (spacectl) — account-specific API host; uncomment/add yours:
+# api.spacelift.io
+# <your-account>.app.spacelift.io
+
+# Kafka (Apache mirrors — also listed in java-toolbelt.txt, repeated here so
+# this file is self-contained if java-toolbelt isn't installed)
+downloads.apache.org
+dlcdn.apache.org
+archive.apache.org

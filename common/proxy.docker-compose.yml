@@ -1,0 +1,52 @@
+# Whitelist-enforcing egress proxy — merged into every stack, alongside each
+# <env>/docker-compose.yml, so every dev container's runtime traffic is
+# forced through it. Wired in three places so no invocation path skips it:
+#   - run.sh: added to the COMPOSE_FILE chain
+#   - <env>/devcontainer.json: added to dockerComposeFile (VS Code)
+#   - manual `docker compose`: pass -f explicitly (see AGENTS.md)
+#
+# Compose resolves relative paths in EVERY merged -f file against the first
+# file's directory, not each file's own directory (verified empirically —
+# see AGENTS.md). The first file is always <env>/docker-compose.yml (run.sh
+# cd's there; devcontainer.json lists it first too), so paths here are
+# written as if relative to <env>/, matching common/base.docker-compose.yml's
+# existing `../common/.zshrc` mount.
+#
+# `proxy` sits on the stack's ordinary default network, same as `dev` — no
+# `internal: true` split. That mechanism was tried and reverted: a container
+# whose only network is `internal: true` never gets its published ports
+# bound by Docker at all (NetworkSettings.Ports comes back null). Egress
+# enforcement for `dev` is done with iptables instead (common/entrypoint.sh),
+# which doesn't care what network topology it's running on.
+services:
+  proxy:
+    build:
+      context: ../common/proxy
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+    image: toolbelt-proxy:latest
+    init: true
+    environment:
+      # Chains Squid to the user's own corporate proxy (proxy.env), if any,
+      # so the whitelist and a required corporate proxy aren't mutually
+      # exclusive. Empty when proxy.env has nothing set.
+      - UPSTREAM_PROXY=${HTTP_PROXY:-${HTTPS_PROXY:-}}
+    volumes:
+      - ../common/proxy/whitelist.d:/etc/squid/whitelist.d:ro
+      - proxy-logs:/var/log/squid
+    ports:
+      - "127.0.0.1:7880-7889:8080" # GoAccess dashboard (live access.log view)
+      - "127.0.0.1:7890-7899:7890" # GoAccess dashboard's WebSocket (live updates)
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "3128"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  proxy-logs:

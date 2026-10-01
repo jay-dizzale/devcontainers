@@ -1,0 +1,5 @@
+# pico-toolbelt
+#
+# pico-sdk, pico-extras, pico-examples and the ARM toolchain are all fetched
+# from github.com/raw.githubusercontent.com, already whitelisted in
+# 00-common.txt — nothing else is needed by default.
