@@ -12,7 +12,6 @@ LABEL description="Whitelist-enforcing forward proxy for devcontainer runtime tr
 # report.html/JS it writes to /var/www.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         squid \
-        netcat-openbsd \
         goaccess \
         python3 \
     && rm -rf /var/lib/apt/lists/* \

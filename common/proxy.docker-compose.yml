@@ -43,7 +43,14 @@ services:
       - "127.0.0.1:7880-7889:8080" # GoAccess dashboard (live access.log view)
       - "127.0.0.1:7890-7899:7890" # GoAccess dashboard's WebSocket (live updates)
     healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "3128"]
+      # Not a raw TCP probe (nc -z) — that opens and closes the client port
+      # without speaking HTTP, which Squid logs every time as a bogus
+      # "transaction-end-before-headers" error (tested: an access_log ACL
+      # exclusion doesn't suppress it, that logging path skips ACLs
+      # entirely). `squid -k check` verifies the running process is alive
+      # via its own signal/PID-file mechanism instead, so it never touches
+      # port 3128 and never shows up in access.log.
+      test: ["CMD", "squid", "-k", "check"]
       interval: 5s
       timeout: 3s
       retries: 10
