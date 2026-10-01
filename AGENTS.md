@@ -203,7 +203,11 @@ explicitly allowed, and every request (allowed or denied) is logged.
   whitelist a new domain on the spot (Enter to skip), added to *that stack's own*
   `<env>-toolbelt.txt` (not `00-common.txt` — reusing `cmd_proxy_allow`). Colors are
   suppressed automatically when stdout isn't a terminal (`[ -t 1 ]`, verified: no escape
-  codes leak into piped output). `proxy allow <domain> [-e <env-toolbelt>]` appends to
+  codes leak into piped output). `overview -f` redraws the same summary every 2s instead
+  (plain ANSI clear-screen, same `[ -t 1 ]`-gated approach as the colors — no `clear`/
+  terminfo dependency) until Ctrl-C/SIGTERM, trapped for a clean "Stopped watching" exit; no
+  domain prompt in that mode, it's meant for passive monitoring like `run.sh logs -f`.
+  `proxy allow <domain> [-e <env-toolbelt>]` appends to
   `00-common.txt` (or `<env>-toolbelt.txt` with `-e`) — skips the append if the domain is
   already listed anywhere — then restarts **every currently-running** proxy container (not
   just the current stack's) so the change applies immediately, since they all load the same
@@ -249,6 +253,7 @@ sh run.sh proxy stop                 # blocks dev's egress until started again
 sh run.sh proxy status               # health, whitelist count, recent log
 sh run.sh proxy clear-log            # truncate access.log in place
 sh run.sh proxy overview             # colorized allow/deny summary + add a domain
+sh run.sh proxy overview -f          # same, but live — redraws every 2s until Ctrl-C
 
 # Whitelist a domain and restart every running proxy to apply it
 sh run.sh proxy allow registry.example.com

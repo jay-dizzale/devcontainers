@@ -63,7 +63,8 @@ startup (dropping all outbound traffic except to the proxy), not just by setting
 
 - **Something you need got blocked?** `sh run.sh proxy overview` (or `dev proxy overview`) —
   a colorized summary of every domain seen, green for allowed, red for denied — ends with a
-  prompt to whitelist a new one on the spot. Or add it directly:
+  prompt to whitelist a new one on the spot. Add `-f` to watch it live instead (redraws every
+  2s until Ctrl-C). Or add a domain directly:
   `sh run.sh proxy allow <domain>` — add `-e <env-toolbelt>` (e.g. `-e java-toolbelt`) to
   scope it to that environment's own whitelist file instead of the shared one. Either way,
   every running proxy restarts so the change applies immediately.

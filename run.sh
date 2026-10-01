@@ -8,7 +8,7 @@
 #        run.sh proxy start|stop [-v /path/to/mount]  — toggle just the proxy sidecar
 #        run.sh proxy status [-v /path/to/mount]      — proxy state + recent access.log
 #        run.sh proxy clear-log [-v /path/to/mount]   — truncate access.log in place
-#        run.sh proxy overview [-v /path/to/mount]    — colorized allow/deny summary + add a domain
+#        run.sh proxy overview [-v /path/to/mount] [-f]  — colorized allow/deny summary + add a domain
 #        run.sh proxy allow <domain> [-e <env-toolbelt>]  — whitelist a domain
 #        run.sh build-base [-r]            — build (or refresh) the shared base image only
 
@@ -74,11 +74,13 @@ Usage:
   run.sh proxy clear-log [-v /path/to/mount]
       Truncate access.log in place (file stays, content is emptied).
 
-  run.sh proxy overview [-v /path/to/mount]
+  run.sh proxy overview [-v /path/to/mount] [-f]
       Colorized allow/deny summary of access.log — one line per domain,
       green for allowed, red for denied, with a hit count and how long ago
       it was last seen. Ends with a prompt to whitelist a new domain
       (added to that stack's own <env>-toolbelt.txt) — Enter to skip.
+      -f redraws the same summary every 2s instead (Ctrl-C to stop); no
+      prompt in that mode.
 
   run.sh proxy allow <domain> [-e <env-toolbelt>]
       Add a domain to common/proxy/whitelist.d/00-common.txt (every
@@ -372,20 +374,11 @@ cmd_proxy_clear_log() {
 }
 
 # ---------------------------------------------------------------------------
-# `proxy overview` — colorized ALLOW/DENY summary of access.log (grouped by
-# domain, with a hit count and how long ago it was last seen), for the
-# stack mounted from a directory, then an interactive prompt to whitelist a
-# new domain on the spot (added to that stack's own <env>-toolbelt.txt).
+# Renders one snapshot of the colorized ALLOW/DENY summary for a proxy
+# container — shared by the one-shot and --follow modes of `proxy overview`.
 # ---------------------------------------------------------------------------
-cmd_proxy_overview() {
-    chosen="$(_resolve_stack "$1")"
-    proj="$(echo "$chosen" | cut -d'|' -f1)"
-    env="$(echo "$chosen" | cut -d'|' -f2)"
-
-    cid="$(_proxy_cid_for_project "$proj")"
-    [ -n "$cid" ] || die "No 'proxy' container found for stack '$proj' ($env)."
-    [ "$(docker inspect "$cid" --format '{{.State.Running}}' 2>/dev/null || echo false)" = "true" ] \
-        || die "Proxy for '$env' (project $proj) isn't running — 'sh run.sh proxy start' first."
+_render_overview() {
+    cid="$1"; env="$2"; proj="$3"
 
     if [ -t 1 ]; then
         _green="$(printf '\033[32m')"; _red="$(printf '\033[31m')"
@@ -395,7 +388,7 @@ cmd_proxy_overview() {
     fi
 
     now="$(date +%s)"
-    echo "${_bold}📡 Egress overview — '$env' (project $proj)${_reset}"
+    echo "${_bold}📡 Egress overview — '$env' (project $proj)${_reset}  [$(date '+%H:%M:%S')]"
     echo
 
     # Groups by host regardless of whether it came from a CONNECT (HTTPS,
@@ -434,6 +427,45 @@ cmd_proxy_overview() {
             fi
         done
     fi
+}
+
+# ---------------------------------------------------------------------------
+# `proxy overview` — colorized ALLOW/DENY summary of access.log (grouped by
+# domain, with a hit count and how long ago it was last seen), for the
+# stack mounted from a directory.
+#
+# One-shot (default): snapshot, then an interactive prompt to whitelist a
+# new domain on the spot (added to that stack's own <env>-toolbelt.txt).
+# --follow: clears and redraws the same snapshot every 2s until Ctrl-C —
+# no prompt in this mode, since it's meant for passive "leave it on screen"
+# monitoring, same spirit as `run.sh logs -f`.
+# ---------------------------------------------------------------------------
+cmd_proxy_overview() {
+    target="$1"; follow="$2"
+    chosen="$(_resolve_stack "$target")"
+    proj="$(echo "$chosen" | cut -d'|' -f1)"
+    env="$(echo "$chosen" | cut -d'|' -f2)"
+
+    cid="$(_proxy_cid_for_project "$proj")"
+    [ -n "$cid" ] || die "No 'proxy' container found for stack '$proj' ($env)."
+    [ "$(docker inspect "$cid" --format '{{.State.Running}}' 2>/dev/null || echo false)" = "true" ] \
+        || die "Proxy for '$env' (project $proj) isn't running — 'sh run.sh proxy start' first."
+
+    if [ "$follow" = "1" ]; then
+        trap 'echo; echo "👋 Stopped watching."; exit 0' INT TERM
+        while true; do
+            # \033[2J\033[H: clear screen + cursor to top-left, same
+            # mechanism as the color codes above — plain ANSI, no
+            # dependency on `clear`/terminfo being installed.
+            [ -t 1 ] && printf '\033[2J\033[H'
+            _render_overview "$cid" "$env" "$proj"
+            echo
+            echo "(Ctrl-C to stop watching)"
+            sleep 2
+        done
+    fi
+
+    _render_overview "$cid" "$env" "$proj"
 
     echo
     printf "➕ Add a domain to '%s's whitelist (Enter to skip): " "$env"
@@ -508,11 +540,15 @@ cmd_proxy() {
     case "$action" in
         start|stop|status|clear-log|overview)
             vol="$INVOCATION_DIR"
+            follow=0
             while [ $# -gt 0 ]; do
                 case "$1" in
                     -v|--volume)
                         [ $# -ge 2 ] || die "--volume requires a value"
                         vol="$2"; shift 2 ;;
+                    -f|--follow)
+                        [ "$action" = "overview" ] || die "-f/--follow is only valid with 'proxy overview'"
+                        follow=1; shift ;;
                     *) die "Unknown argument: $1" ;;
                 esac
             done
@@ -523,7 +559,7 @@ cmd_proxy() {
                 stop)      cmd_proxy_stop "$vol" ;;
                 status)    cmd_proxy_status "$vol" ;;
                 clear-log) cmd_proxy_clear_log "$vol" ;;
-                overview)  cmd_proxy_overview "$vol" ;;
+                overview)  cmd_proxy_overview "$vol" "$follow" ;;
             esac
             ;;
         allow)
