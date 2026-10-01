@@ -62,12 +62,9 @@ startup (dropping all outbound traffic except to the proxy), not just by setting
 — a process that ignores those env vars still can't reach the internet directly.
 
 - **Something you need got blocked?** Check `sh run.sh logs` (or `dev logs`) for the denied
-  domain, then add
-  it to `common/proxy/whitelist.d/<env>-toolbelt.txt` (grouped by the environment that needs
-  it, though every environment's proxy loads the whole `whitelist.d/` directory) or
-  `common/proxy/whitelist.d/00-common.txt` if it's needed everywhere. Apply the change with
-  `docker compose restart proxy` (from the environment's directory) — edits only take effect on
-  the next start.
+  domain, then `sh run.sh proxy allow <domain>` — add `-e <env-toolbelt>` (e.g.
+  `-e java-toolbelt`) to scope it to that environment's own whitelist file instead of the
+  shared one. This restarts every running proxy so the change applies immediately.
 - **Filtering is domain-level, not a man-in-the-middle** — Squid reads the domain from the
   `CONNECT` request for HTTPS (or the request host for plain HTTP) and either tunnels the
   connection untouched or denies it. It never decrypts traffic, so no certificate needs to be
@@ -76,8 +73,10 @@ startup (dropping all outbound traffic except to the proxy), not just by setting
   uses `proxy.env` (below) if you've set one, unaffected by the whitelist.
 - If `proxy.env` configures a corporate proxy, the whitelist proxy chains to it automatically —
   the two aren't mutually exclusive.
-- **Live dashboard** — run `docker compose port proxy 8080` (from the environment's
-  directory) for the actual host port, then open `http://127.0.0.1:<port>/report.html` in a
+- **Manage it** with `sh run.sh proxy start|stop|status` (per-stack) — `status` prints
+  container health, the whitelisted-domain count, and the last 15 log lines.
+- **Live dashboard** — `sh run.sh proxy status` prints the actual dashboard URL for the
+  current port mapping; open it in a
   browser for a live-updating view of every allowed/denied connection.
 
 See [`AGENTS.md`](AGENTS.md#egress-proxy-and-domain-whitelist) for the full architecture.

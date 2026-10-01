@@ -203,6 +203,19 @@ explicitly allowed, and every request (allowed or denied) is logged.
   proxy is set, `proxy.docker-compose.yml`'s `proxy` service also chains to it at *runtime* via
   a generated `cache_peer` (see `common/proxy/entrypoint.sh`), so a corporate network's proxy
   requirement and the whitelist aren't mutually exclusive.
+- **Day-to-day management is `sh run.sh proxy ...`** (`start`/`stop`/`status`/`allow`), not raw
+  `docker`. `proxy start`/`stop` toggle the sidecar for one stack (`docker start`/`stop` on its
+  container — `stop` blocks all of `dev`'s egress until it's started again). `proxy status`
+  shows container/health state, the whitelisted-domain count, the dashboard URL, and the last
+  15 `access.log` lines. `proxy allow <domain> [-e <env-toolbelt>]` appends to
+  `00-common.txt` (or `<env>-toolbelt.txt` with `-e`) — skips the append if the domain is
+  already listed anywhere — then restarts **every currently-running** proxy container (not
+  just the current stack's) so the change applies immediately, since they all load the same
+  shared `whitelist.d/` directory. That restart scan matches on the `proxy` service name
+  (it carries no `devcontainer.env` label of its own — only `dev` does) further narrowed to
+  containers whose compose config-files label actually includes
+  `common/proxy.docker-compose.yml`, so it can never touch an unrelated project's own
+  `proxy` service.
 
 ## Commands
 
@@ -226,6 +239,15 @@ sh run.sh list
 sh run.sh logs
 sh run.sh logs -f                    # follow live
 sh run.sh logs -v /path/to/your/project
+
+# Toggle just the proxy sidecar for the stack mounted from a directory
+sh run.sh proxy start
+sh run.sh proxy stop                 # blocks dev's egress until started again
+sh run.sh proxy status               # health, whitelist count, dashboard URL, recent log
+
+# Whitelist a domain and restart every running proxy to apply it
+sh run.sh proxy allow registry.example.com
+sh run.sh proxy allow registry.example.com -e java-toolbelt   # that env's own whitelist file
 
 # Stop & delete the stack(s) mounted from a directory (containers, networks, anon volumes)
 sh run.sh stop

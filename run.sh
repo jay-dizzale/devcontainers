@@ -5,6 +5,9 @@
 #        run.sh stop --all                 — stop & delete every devcontainer stack
 #        run.sh list                       — list every devcontainer stack
 #        run.sh logs [-v /path/to/mount] [-f]  — view/tail the egress proxy's access log
+#        run.sh proxy start|stop [-v /path/to/mount]  — toggle just the proxy sidecar
+#        run.sh proxy status [-v /path/to/mount]      — proxy state + recent access.log
+#        run.sh proxy allow <domain> [-e <env-toolbelt>]  — whitelist a domain
 #        run.sh build-base [-r]            — build (or refresh) the shared base image only
 
 set -eu
@@ -55,6 +58,22 @@ Usage:
       Show the whitelist proxy's access log (allowed + denied domains) for
       the stack mounted from that directory (default: cwd). -f follows it
       live; prompts if more than one stack is running from that directory.
+
+  run.sh proxy start [-v /path/to/mount]
+  run.sh proxy stop [-v /path/to/mount]
+      Start/stop just the proxy sidecar for the stack mounted from that
+      directory, without touching `dev` or tearing the stack down. Stopping
+      it blocks all of dev's egress until it's started again.
+
+  run.sh proxy status [-v /path/to/mount]
+      Proxy container/health state, whitelisted domain count, the live
+      dashboard URL, and the last 15 lines of access.log.
+
+  run.sh proxy allow <domain> [-e <env-toolbelt>]
+      Add a domain to common/proxy/whitelist.d/00-common.txt (every
+      environment), or to a specific <env>-toolbelt.txt with -e (e.g.
+      -e java-toolbelt) — restarts every currently-running proxy container
+      so the change applies immediately.
 
   run.sh build-base [-r] [--debug]
       Build the shared base image (toolbelt-base:latest) and exit. Only
@@ -173,13 +192,13 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# `logs` subcommand — tail (or one-shot view) the whitelist proxy's access
-# log for the stack mounted from the given directory (default: cwd). If
-# more than one stack is running from that directory, prompts to pick one.
+# Resolve the stack mounted from a directory to "project|env" on stdout.
+# Shared by `logs` and every `proxy` subcommand. Prompts to pick one if more
+# than one stack is running from that directory.
 # ---------------------------------------------------------------------------
-cmd_logs() {
-    target="$1"; follow="$2"
-    echo "🔍 Looking for containers mounted from: $target"
+_resolve_stack() {
+    target="$1"
+    echo "🔍 Looking for containers mounted from: $target" >&2
 
     candidates="$(docker ps -a -q --filter "label=devcontainer.env" 2>/dev/null || true)"
     [ -n "$candidates" ] || die "No devcontainer stacks found."
@@ -199,22 +218,42 @@ cmd_logs() {
 
     count="$(echo "$proj_env_list" | wc -l)"
     if [ "$count" -eq 1 ]; then
-        chosen="$proj_env_list"
-    else
-        envs="$(echo "$proj_env_list" | cut -d'|' -f2)"
-        # shellcheck disable=SC2086
-        idx="$(pick_from_list "🐳 Multiple stacks running from this directory" $envs)"
-        chosen="$(echo "$proj_env_list" | awk -v n="$idx" 'NR==n{print; exit}')"
-        [ -n "$chosen" ] || die "Invalid selection: $idx"
+        echo "$proj_env_list"
+        return 0
     fi
 
+    envs="$(echo "$proj_env_list" | cut -d'|' -f2)"
+    # shellcheck disable=SC2086
+    idx="$(pick_from_list "🐳 Multiple stacks running from this directory" $envs)"
+    chosen="$(echo "$proj_env_list" | awk -v n="$idx" 'NR==n{print; exit}')"
+    [ -n "$chosen" ] || die "Invalid selection: $idx"
+    echo "$chosen"
+}
+
+# ---------------------------------------------------------------------------
+# The `proxy` container ID for a compose project, running or not (`-a`) —
+# callers that need a running container check .State.Running themselves.
+# ---------------------------------------------------------------------------
+_proxy_cid_for_project() {
+    docker ps -a -q \
+        --filter "label=com.docker.compose.project=${1}" \
+        --filter "label=com.docker.compose.service=proxy" 2>/dev/null | head -n 1
+}
+
+# ---------------------------------------------------------------------------
+# `logs` subcommand — tail (or one-shot view) the whitelist proxy's access
+# log for the stack mounted from the given directory (default: cwd).
+# ---------------------------------------------------------------------------
+cmd_logs() {
+    target="$1"; follow="$2"
+    chosen="$(_resolve_stack "$target")"
     proj="$(echo "$chosen" | cut -d'|' -f1)"
     env="$(echo "$chosen" | cut -d'|' -f2)"
 
-    proxy_cid="$(docker ps -q \
-        --filter "label=com.docker.compose.project=${proj}" \
-        --filter "label=com.docker.compose.service=proxy" 2>/dev/null | head -n 1)"
-    [ -n "$proxy_cid" ] || die "No running 'proxy' container found for stack '$proj' ($env)."
+    proxy_cid="$(_proxy_cid_for_project "$proj")"
+    [ -n "$proxy_cid" ] || die "No 'proxy' container found for stack '$proj' ($env)."
+    [ "$(docker inspect "$proxy_cid" --format '{{.State.Running}}' 2>/dev/null || echo false)" = "true" ] \
+        || die "Proxy for '$env' (project $proj) isn't running — 'sh run.sh proxy start' to bring it back up."
 
     # No -t: tail doesn't need a TTY, and this way `logs` also works when
     # run.sh's own stdin/stdout aren't a terminal (e.g. piped/scripted).
@@ -227,6 +266,197 @@ cmd_logs() {
     fi
     exit 0
 }
+
+# ---------------------------------------------------------------------------
+# `proxy start`/`proxy stop` — toggle just the proxy sidecar for the stack
+# mounted from a directory, without touching `dev` or tearing anything down.
+# ---------------------------------------------------------------------------
+cmd_proxy_start() {
+    chosen="$(_resolve_stack "$1")"
+    proj="$(echo "$chosen" | cut -d'|' -f1)"
+    env="$(echo "$chosen" | cut -d'|' -f2)"
+
+    cid="$(_proxy_cid_for_project "$proj")"
+    [ -n "$cid" ] || die "No 'proxy' container found for stack '$proj' ($env). Start the stack first with 'sh run.sh'."
+
+    if [ "$(docker inspect "$cid" --format '{{.State.Running}}' 2>/dev/null || echo false)" = "true" ]; then
+        echo "✅ Proxy for '$env' (project $proj) is already running."
+        exit 0
+    fi
+
+    echo "▶️  Starting proxy for '$env' (project $proj) ..."
+    docker start "$cid" >/dev/null || die "Failed to start proxy container."
+    echo "✅ Proxy started — dev's egress is allowed again."
+    exit 0
+}
+
+cmd_proxy_stop() {
+    chosen="$(_resolve_stack "$1")"
+    proj="$(echo "$chosen" | cut -d'|' -f1)"
+    env="$(echo "$chosen" | cut -d'|' -f2)"
+
+    cid="$(_proxy_cid_for_project "$proj")"
+    [ -n "$cid" ] || die "No 'proxy' container found for stack '$proj' ($env)."
+
+    if [ "$(docker inspect "$cid" --format '{{.State.Running}}' 2>/dev/null || echo false)" != "true" ]; then
+        echo "ℹ️  Proxy for '$env' (project $proj) is already stopped."
+        exit 0
+    fi
+
+    echo "⏸️  Stopping proxy for '$env' (project $proj) — dev's egress will be blocked until it's started again ..."
+    docker stop "$cid" >/dev/null || die "Failed to stop proxy container."
+    echo "✅ Proxy stopped."
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# `proxy status` — container/health state, whitelisted domain count,
+# dashboard URL, and a short tail of access.log, for the stack mounted from
+# a directory.
+# ---------------------------------------------------------------------------
+cmd_proxy_status() {
+    chosen="$(_resolve_stack "$1")"
+    proj="$(echo "$chosen" | cut -d'|' -f1)"
+    env="$(echo "$chosen" | cut -d'|' -f2)"
+
+    cid="$(_proxy_cid_for_project "$proj")"
+    [ -n "$cid" ] || die "No 'proxy' container found for stack '$proj' ($env)."
+
+    status="$(docker inspect "$cid" --format '{{.State.Status}}' 2>/dev/null || echo unknown)"
+    health="$(docker inspect "$cid" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' 2>/dev/null || echo unknown)"
+
+    echo "📡 Proxy status for '$env' (project $proj)"
+    echo "   container: $status (health: $health)"
+
+    if [ "$status" != "running" ]; then
+        echo "   (not running — 'sh run.sh proxy start' to bring it back up)"
+        exit 0
+    fi
+
+    domains="$(docker exec "$cid" sh -c 'wc -l < /etc/squid/whitelist.txt' 2>/dev/null || echo "?")"
+    echo "   whitelisted domains: $domains"
+
+    dash_port="$(docker port "$cid" 8080/tcp 2>/dev/null | sed -n 's/.*://p' | head -n 1)"
+    [ -n "$dash_port" ] && echo "   dashboard: http://127.0.0.1:${dash_port}/report.html"
+
+    echo "   recent access.log:"
+    docker exec -i "$cid" tail -n 15 /var/log/squid/access.log 2>/dev/null | sed 's/^/     /'
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# `proxy allow <domain>` — add a domain to the whitelist (common/proxy/
+# whitelist.d/00-common.txt by default, or a specific <env>-toolbelt.txt
+# with -e) and restart every currently-running proxy container so the
+# change applies immediately — every stack's proxy loads the whole
+# whitelist.d/ directory, so this isn't scoped to one stack.
+# ---------------------------------------------------------------------------
+cmd_proxy_allow() {
+    domain="$1"; env="$2"
+    whitelist_dir="$SCRIPT_DIR/common/proxy/whitelist.d"
+
+    if [ -n "$env" ]; then
+        target_file="$whitelist_dir/${env}.txt"
+        [ -f "$target_file" ] || die "No whitelist file for '$env' — expected $target_file (name matches the toolbelt directory, e.g. java-toolbelt)"
+    else
+        target_file="$whitelist_dir/00-common.txt"
+    fi
+
+    if grep -qxF "$domain" "$whitelist_dir"/*.txt 2>/dev/null; then
+        echo "ℹ️  '$domain' is already whitelisted (in $(grep -lxF "$domain" "$whitelist_dir"/*.txt | xargs -n1 basename | tr '\n' ' '))."
+    else
+        printf '%s\n' "$domain" >> "$target_file"
+        echo "✅ Added '$domain' to $(basename "$target_file")."
+    fi
+
+    # The `proxy` service carries no `devcontainer.env` label of its own
+    # (only `dev` does), so filter on its compose service name — then
+    # double-check each match's config-files label actually includes our
+    # proxy.docker-compose.yml, so an unrelated project's own "proxy"
+    # service (if one somehow exists on the host) is never touched.
+    running_proxies=""
+    for cid in $(docker ps -q --filter "label=com.docker.compose.service=proxy" 2>/dev/null || true); do
+        case "$(docker inspect "$cid" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)" in
+            */common/proxy.docker-compose.yml*) running_proxies="$running_proxies $cid" ;;
+        esac
+    done
+    if [ -z "$running_proxies" ]; then
+        echo "ℹ️  No running proxy containers right now — the new domain applies the next time a stack starts."
+        exit 0
+    fi
+
+    echo "🔁 Restarting running proxy container(s) so the change takes effect ..."
+    for cid in $running_proxies; do
+        env_label="$(docker inspect "$cid" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null | xargs -I{} basename {} || echo "?")"
+        if docker restart "$cid" >/dev/null 2>&1; then
+            echo "   ✅ $env_label"
+        else
+            echo "   ⚠️  failed to restart $env_label" >&2
+        fi
+    done
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# `proxy` dispatcher — parses its own sub-action + flags and always exits
+# itself, same as the other early-dispatch subcommands.
+# ---------------------------------------------------------------------------
+cmd_proxy() {
+    action="${1:-}"
+    [ -n "$action" ] && shift
+
+    case "$action" in
+        start|stop|status)
+            vol="$INVOCATION_DIR"
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    -v|--volume)
+                        [ $# -ge 2 ] || die "--volume requires a value"
+                        vol="$2"; shift 2 ;;
+                    *) die "Unknown argument: $1" ;;
+                esac
+            done
+            vol="$(cd "$vol" 2>/dev/null && pwd)" || die "Volume directory not found: $vol"
+            case "$action" in
+                start)  cmd_proxy_start "$vol" ;;
+                stop)   cmd_proxy_stop "$vol" ;;
+                status) cmd_proxy_status "$vol" ;;
+            esac
+            ;;
+        allow)
+            domain="${1:-}"
+            [ -n "$domain" ] || die "Usage: run.sh proxy allow <domain> [-e <env-toolbelt>]"
+            shift
+            env=""
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    -e|--env)
+                        [ $# -ge 2 ] || die "--env requires a value"
+                        env="$2"; shift 2 ;;
+                    *) die "Unknown argument: $1" ;;
+                esac
+            done
+            cmd_proxy_allow "$domain" "$env"
+            ;;
+        "")
+            die "Usage: run.sh proxy <start|stop|status|allow> ..."
+            ;;
+        *)
+            die "Unknown 'proxy' action: $action (expected start, stop, status, or allow)"
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# `proxy` has its own sub-action + flags (start|stop|status|allow), so it's
+# dispatched here, before the generic one-level flag loop below, and always
+# exits itself.
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "proxy" ]; then
+    shift
+    cmd_proxy "$@"
+    exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Arguments  (-v defaults to the directory run.sh was called from)
