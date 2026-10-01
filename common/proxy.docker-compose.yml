@@ -39,9 +39,6 @@ services:
     volumes:
       - ../common/proxy/whitelist.d:/etc/squid/whitelist.d:ro
       - proxy-logs:/var/log/squid
-    ports:
-      - "127.0.0.1:7880-7889:8080" # GoAccess dashboard (live access.log view)
-      - "127.0.0.1:7890-7899:7890" # GoAccess dashboard's WebSocket (live updates)
     healthcheck:
       # Not a raw TCP probe (nc -z) — that opens and closes the client port
       # without speaking HTTP, which Squid logs every time as a bogus

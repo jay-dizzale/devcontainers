@@ -169,24 +169,12 @@ explicitly allowed, and every request (allowed or denied) is logged.
   (Logging straight to this container's stdout was tried and reverted — Squid drops privileges
   to `cache_effective_user proxy` before opening log files, and that user can't write to the
   container's stdout, so Squid fails to start; see the comment in `common/proxy/squid.conf`.)
-- **Live dashboard**: the `proxy` container also runs GoAccess against its own `access.log`
-  in `--real-time-html` mode, bundled into `common/proxy/Dockerfile`/`entrypoint.sh` (not a
-  separate service — keeps it to one container VS Code manages, and lets it read the log
-  straight off local disk instead of over a shared volume). GoAccess only runs a WebSocket
-  server for live pushes (`--port=7890`), not a general web server, so `entrypoint.sh` also
-  backgrounds a `python3 -m http.server 8080` to actually serve the `report.html`/JS it
-  writes to `/var/www`; both are published as host port ranges
-  (`127.0.0.1:7880-7889:8080` and `127.0.0.1:7890-7899:7890` in
-  `common/proxy.docker-compose.yml`) — check `docker compose port proxy 8080` (or `docker
-  ps`) for which port actually landed, since a second simultaneous stack will get a
-  different one from the range. GoAccess's Squid support needs `--date-format=%s
-  --time-format=%s` plus `%x` in `--log-format` (its own documented example, in
-  `/etc/goaccess/goaccess.conf` inside the image) to treat the first field as a raw Unix
-  timestamp; **the elapsed-time field specifically must use `%~%L`, not a generic `%^`** —
-  Squid right-pads it to a fixed width (`%6tr`) and a generic `%^` does not correctly skip
-  that variable leading whitespace (tested: it silently misaligns every field after it).
-  Squid itself is still PID 1 (`exec`'d last in `entrypoint.sh`), so the fast
-  `shutdown_lifetime 0` teardown is unaffected.
+- **No GoAccess/web dashboard** — tried bundling GoAccess's `--real-time-html` mode (plus a
+  `python3 -m http.server` to serve it, since GoAccess only runs the WebSocket side) directly
+  into the `proxy` container, published as host port ranges. Removed again: `sh run.sh proxy
+  overview` (CLI, parses `access.log` directly — see Commands below) covers the same need
+  without a second runtime (Python), a web server, published ports, or a port-range/
+  WebSocket-URL mismatch to work around.
 - **Wired in three places so no invocation path skips it** — keep them in sync when touching
   this: `run.sh`'s `COMPOSE_FILE` chain, every `<env>/devcontainer.json`'s
   `dockerComposeFile` array, and the manual `docker compose -f ... -f ...` invocation
@@ -203,11 +191,19 @@ explicitly allowed, and every request (allowed or denied) is logged.
   proxy is set, `proxy.docker-compose.yml`'s `proxy` service also chains to it at *runtime* via
   a generated `cache_peer` (see `common/proxy/entrypoint.sh`), so a corporate network's proxy
   requirement and the whitelist aren't mutually exclusive.
-- **Day-to-day management is `sh run.sh proxy ...`** (`start`/`stop`/`status`/`allow`), not raw
-  `docker`. `proxy start`/`stop` toggle the sidecar for one stack (`docker start`/`stop` on its
-  container — `stop` blocks all of `dev`'s egress until it's started again). `proxy status`
-  shows container/health state, the whitelisted-domain count, the dashboard URL, and the last
-  15 `access.log` lines. `proxy allow <domain> [-e <env-toolbelt>]` appends to
+- **Day-to-day management is `sh run.sh proxy ...`** (`start`/`stop`/`status`/`clear-log`/
+  `overview`/`allow`), not raw `docker`. `proxy start`/`stop` toggle the sidecar for one stack
+  (`docker start`/`stop` on its container — `stop` blocks all of `dev`'s egress until it's
+  started again). `proxy status` shows container/health state, the whitelisted-domain count,
+  and the last 15 `access.log` lines. `proxy clear-log` truncates `access.log` in place for
+  that stack. `proxy overview` is a colorized allow/deny summary —
+  one line per domain (green ✅ allowed, red ⛔ denied) with a hit count and "Xs ago", parsed
+  from `access.log`'s `code/status` and `url` fields (`$4`/`$7` — see
+  `common/proxy/squid.conf` for the full field layout); it ends with an interactive prompt to
+  whitelist a new domain on the spot (Enter to skip), added to *that stack's own*
+  `<env>-toolbelt.txt` (not `00-common.txt` — reusing `cmd_proxy_allow`). Colors are
+  suppressed automatically when stdout isn't a terminal (`[ -t 1 ]`, verified: no escape
+  codes leak into piped output). `proxy allow <domain> [-e <env-toolbelt>]` appends to
   `00-common.txt` (or `<env>-toolbelt.txt` with `-e`) — skips the append if the domain is
   already listed anywhere — then restarts **every currently-running** proxy container (not
   just the current stack's) so the change applies immediately, since they all load the same
@@ -216,6 +212,13 @@ explicitly allowed, and every request (allowed or denied) is logged.
   containers whose compose config-files label actually includes
   `common/proxy.docker-compose.yml`, so it can never touch an unrelated project's own
   `proxy` service.
+- **`proxy`'s own `-v` must be extracted *before* checking `$1 = "proxy"`.** The `dev()` shell
+  function `setup.sh` installs always runs `run.sh -v "$(pwd)" "$@"` — a leading `-v <path>`
+  ahead of whatever was actually typed. Without accounting for that, `dev proxy status` arrives
+  as `-v <path> proxy status`, `$1` is `-v` not `proxy`, the dispatch is skipped, and it falls
+  through to the generic loop and dies on "Unknown argument: proxy" (this actually happened —
+  fixed by peeling off one leading `-v`/`--volume` before the `proxy` check, then putting it
+  back for the generic loop if the call turns out not to be a `proxy` one after all).
 
 ## Commands
 
@@ -243,7 +246,9 @@ sh run.sh logs -v /path/to/your/project
 # Toggle just the proxy sidecar for the stack mounted from a directory
 sh run.sh proxy start
 sh run.sh proxy stop                 # blocks dev's egress until started again
-sh run.sh proxy status               # health, whitelist count, dashboard URL, recent log
+sh run.sh proxy status               # health, whitelist count, recent log
+sh run.sh proxy clear-log            # truncate access.log in place
+sh run.sh proxy overview             # colorized allow/deny summary + add a domain
 
 # Whitelist a domain and restart every running proxy to apply it
 sh run.sh proxy allow registry.example.com

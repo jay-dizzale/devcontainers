@@ -7,6 +7,8 @@
 #        run.sh logs [-v /path/to/mount] [-f]  — view/tail the egress proxy's access log
 #        run.sh proxy start|stop [-v /path/to/mount]  — toggle just the proxy sidecar
 #        run.sh proxy status [-v /path/to/mount]      — proxy state + recent access.log
+#        run.sh proxy clear-log [-v /path/to/mount]   — truncate access.log in place
+#        run.sh proxy overview [-v /path/to/mount]    — colorized allow/deny summary + add a domain
 #        run.sh proxy allow <domain> [-e <env-toolbelt>]  — whitelist a domain
 #        run.sh build-base [-r]            — build (or refresh) the shared base image only
 
@@ -66,8 +68,17 @@ Usage:
       it blocks all of dev's egress until it's started again.
 
   run.sh proxy status [-v /path/to/mount]
-      Proxy container/health state, whitelisted domain count, the live
-      dashboard URL, and the last 15 lines of access.log.
+      Proxy container/health state, whitelisted domain count, and the last
+      15 lines of access.log.
+
+  run.sh proxy clear-log [-v /path/to/mount]
+      Truncate access.log in place (file stays, content is emptied).
+
+  run.sh proxy overview [-v /path/to/mount]
+      Colorized allow/deny summary of access.log — one line per domain,
+      green for allowed, red for denied, with a hit count and how long ago
+      it was last seen. Ends with a prompt to whitelist a new domain
+      (added to that stack's own <env>-toolbelt.txt) — Enter to skip.
 
   run.sh proxy allow <domain> [-e <env-toolbelt>]
       Add a domain to common/proxy/whitelist.d/00-common.txt (every
@@ -310,9 +321,8 @@ cmd_proxy_stop() {
 }
 
 # ---------------------------------------------------------------------------
-# `proxy status` — container/health state, whitelisted domain count,
-# dashboard URL, and a short tail of access.log, for the stack mounted from
-# a directory.
+# `proxy status` — container/health state, whitelisted domain count, and a
+# short tail of access.log, for the stack mounted from a directory.
 # ---------------------------------------------------------------------------
 cmd_proxy_status() {
     chosen="$(_resolve_stack "$1")"
@@ -336,11 +346,101 @@ cmd_proxy_status() {
     domains="$(docker exec "$cid" sh -c 'wc -l < /etc/squid/whitelist.txt' 2>/dev/null || echo "?")"
     echo "   whitelisted domains: $domains"
 
-    dash_port="$(docker port "$cid" 8080/tcp 2>/dev/null | sed -n 's/.*://p' | head -n 1)"
-    [ -n "$dash_port" ] && echo "   dashboard: http://127.0.0.1:${dash_port}/report.html"
-
     echo "   recent access.log:"
     docker exec -i "$cid" tail -n 15 /var/log/squid/access.log 2>/dev/null | sed 's/^/     /'
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# `proxy clear-log` — empty access.log in place (truncate, not delete) for
+# the stack mounted from a directory.
+# ---------------------------------------------------------------------------
+cmd_proxy_clear_log() {
+    chosen="$(_resolve_stack "$1")"
+    proj="$(echo "$chosen" | cut -d'|' -f1)"
+    env="$(echo "$chosen" | cut -d'|' -f2)"
+
+    cid="$(_proxy_cid_for_project "$proj")"
+    [ -n "$cid" ] || die "No 'proxy' container found for stack '$proj' ($env)."
+    [ "$(docker inspect "$cid" --format '{{.State.Running}}' 2>/dev/null || echo false)" = "true" ] \
+        || die "Proxy for '$env' (project $proj) isn't running — 'sh run.sh proxy start' first."
+
+    docker exec -u root -i "$cid" sh -c ': > /var/log/squid/access.log' \
+        || die "Failed to clear access.log."
+    echo "🧹 Cleared access.log for '$env' (project $proj)."
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# `proxy overview` — colorized ALLOW/DENY summary of access.log (grouped by
+# domain, with a hit count and how long ago it was last seen), for the
+# stack mounted from a directory, then an interactive prompt to whitelist a
+# new domain on the spot (added to that stack's own <env>-toolbelt.txt).
+# ---------------------------------------------------------------------------
+cmd_proxy_overview() {
+    chosen="$(_resolve_stack "$1")"
+    proj="$(echo "$chosen" | cut -d'|' -f1)"
+    env="$(echo "$chosen" | cut -d'|' -f2)"
+
+    cid="$(_proxy_cid_for_project "$proj")"
+    [ -n "$cid" ] || die "No 'proxy' container found for stack '$proj' ($env)."
+    [ "$(docker inspect "$cid" --format '{{.State.Running}}' 2>/dev/null || echo false)" = "true" ] \
+        || die "Proxy for '$env' (project $proj) isn't running — 'sh run.sh proxy start' first."
+
+    if [ -t 1 ]; then
+        _green="$(printf '\033[32m')"; _red="$(printf '\033[31m')"
+        _bold="$(printf '\033[1m')"; _reset="$(printf '\033[0m')"
+    else
+        _green=""; _red=""; _bold=""; _reset=""
+    fi
+
+    now="$(date +%s)"
+    echo "${_bold}📡 Egress overview — '$env' (project $proj)${_reset}"
+    echo
+
+    # Groups by host regardless of whether it came from a CONNECT (HTTPS,
+    # e.g. "github.com:443") or a plain-HTTP GET (e.g. "http://host/path")
+    # line — strip scheme, path, and port down to just the host. $4 is
+    # Squid's "code/status" field (e.g. TCP_TUNNEL/200, TCP_DENIED/403); $7
+    # is the URL. See common/proxy/squid.conf for the full field layout.
+    summary="$(docker exec "$cid" cat /var/log/squid/access.log 2>/dev/null | awk '
+        {
+            code = $4; url = $7
+            split(code, cs, "/")
+            verdict = (cs[1] ~ /DENIED/) ? "DENY" : "ALLOW"
+            host = url
+            sub(/^[a-zA-Z]+:\/\//, "", host)
+            sub(/\/.*/, "", host)
+            sub(/:[0-9]+$/, "", host)
+            if (host == "") next
+            key = verdict "\t" host
+            count[key]++
+            if ($1 + 0 > last[key]) last[key] = $1
+        }
+        END {
+            for (k in count) print k "\t" count[k] "\t" last[k]
+        }
+    ')"
+
+    if [ -z "$summary" ]; then
+        echo "   (no traffic logged yet)"
+    else
+        echo "$summary" | sort -t "$(printf '\t')" -k2,2 | while IFS="$(printf '\t')" read -r verdict host cnt last_ts; do
+            ago=$((now - ${last_ts%.*}))
+            if [ "$verdict" = "ALLOW" ]; then
+                printf "   %s✅ ALLOW%s  %-40s  %3sx  %ss ago\n" "$_green" "$_reset" "$host" "$cnt" "$ago"
+            else
+                printf "   %s⛔ DENY %s  %-40s  %3sx  %ss ago\n" "$_red" "$_reset" "$host" "$cnt" "$ago"
+            fi
+        done
+    fi
+
+    echo
+    printf "➕ Add a domain to '%s's whitelist (Enter to skip): " "$env"
+    read -r new_domain
+    if [ -n "$new_domain" ]; then
+        cmd_proxy_allow "$new_domain" "$env"
+    fi
     exit 0
 }
 
@@ -406,7 +506,7 @@ cmd_proxy() {
     [ -n "$action" ] && shift
 
     case "$action" in
-        start|stop|status)
+        start|stop|status|clear-log|overview)
             vol="$INVOCATION_DIR"
             while [ $# -gt 0 ]; do
                 case "$1" in
@@ -416,11 +516,14 @@ cmd_proxy() {
                     *) die "Unknown argument: $1" ;;
                 esac
             done
-            vol="$(cd "$vol" 2>/dev/null && pwd)" || die "Volume directory not found: $vol"
+            _vol_in="$vol"
+            vol="$(cd "$vol" 2>/dev/null && pwd)" || die "Volume directory not found: $_vol_in"
             case "$action" in
-                start)  cmd_proxy_start "$vol" ;;
-                stop)   cmd_proxy_stop "$vol" ;;
-                status) cmd_proxy_status "$vol" ;;
+                start)     cmd_proxy_start "$vol" ;;
+                stop)      cmd_proxy_stop "$vol" ;;
+                status)    cmd_proxy_status "$vol" ;;
+                clear-log) cmd_proxy_clear_log "$vol" ;;
+                overview)  cmd_proxy_overview "$vol" ;;
             esac
             ;;
         allow)
@@ -439,23 +542,46 @@ cmd_proxy() {
             cmd_proxy_allow "$domain" "$env"
             ;;
         "")
-            die "Usage: run.sh proxy <start|stop|status|allow> ..."
+            die "Usage: run.sh proxy <start|stop|status|clear-log|overview|allow> ..."
             ;;
         *)
-            die "Unknown 'proxy' action: $action (expected start, stop, status, or allow)"
+            die "Unknown 'proxy' action: $action (expected start, stop, status, clear-log, overview, or allow)"
             ;;
     esac
 }
 
 # ---------------------------------------------------------------------------
-# `proxy` has its own sub-action + flags (start|stop|status|allow), so it's
-# dispatched here, before the generic one-level flag loop below, and always
-# exits itself.
+# `proxy` has its own sub-action + flags (start|stop|status|clear-log|
+# allow), so it's dispatched here, before the generic one-level flag loop
+# below, and always exits itself.
+#
+# The `dev()` shell function setup.sh installs always runs
+# `run.sh -v "$(pwd)" "$@"` — i.e. a leading `-v <path>` before whatever the
+# user actually typed, so `dev proxy status` arrives here as
+# `-v <path> proxy status`, not `proxy status`. Extract that one leading
+# -v/--volume first (tested: without this, `dev proxy ...` fell through to
+# the generic loop and died on "Unknown argument: proxy"); if it turns out
+# this isn't a `proxy` call after all, put it back so the generic loop below
+# still sees it exactly as before.
 # ---------------------------------------------------------------------------
+_pre_volume=""
+case "${1:-}" in
+    -v|--volume)
+        [ $# -ge 2 ] || die "--volume requires a value"
+        _pre_volume="$2"
+        shift 2
+        ;;
+esac
+
 if [ "${1:-}" = "proxy" ]; then
     shift
+    [ -n "$_pre_volume" ] && INVOCATION_DIR="$_pre_volume"
     cmd_proxy "$@"
     exit 0
+fi
+
+if [ -n "$_pre_volume" ]; then
+    set -- -v "$_pre_volume" "$@"
 fi
 
 # ---------------------------------------------------------------------------
@@ -487,7 +613,8 @@ while [ $# -gt 0 ]; do
         *) die "Unknown argument: $1" ;;
     esac
 done
-VOLUME="$(cd "$VOLUME" 2>/dev/null && pwd)" || die "Volume directory not found: $VOLUME"
+_volume_in="$VOLUME"
+VOLUME="$(cd "$VOLUME" 2>/dev/null && pwd)" || die "Volume directory not found: $_volume_in"
 export VOLUME
 
 if [ "$LIST" = "1" ]; then

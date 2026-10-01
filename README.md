@@ -61,10 +61,12 @@ or denied) is logged. This is enforced by iptables rules set inside the containe
 startup (dropping all outbound traffic except to the proxy), not just by setting `HTTP_PROXY`
 — a process that ignores those env vars still can't reach the internet directly.
 
-- **Something you need got blocked?** Check `sh run.sh logs` (or `dev logs`) for the denied
-  domain, then `sh run.sh proxy allow <domain>` — add `-e <env-toolbelt>` (e.g.
-  `-e java-toolbelt`) to scope it to that environment's own whitelist file instead of the
-  shared one. This restarts every running proxy so the change applies immediately.
+- **Something you need got blocked?** `sh run.sh proxy overview` (or `dev proxy overview`) —
+  a colorized summary of every domain seen, green for allowed, red for denied — ends with a
+  prompt to whitelist a new one on the spot. Or add it directly:
+  `sh run.sh proxy allow <domain>` — add `-e <env-toolbelt>` (e.g. `-e java-toolbelt`) to
+  scope it to that environment's own whitelist file instead of the shared one. Either way,
+  every running proxy restarts so the change applies immediately.
 - **Filtering is domain-level, not a man-in-the-middle** — Squid reads the domain from the
   `CONNECT` request for HTTPS (or the request host for plain HTTP) and either tunnels the
   connection untouched or denies it. It never decrypts traffic, so no certificate needs to be
@@ -73,11 +75,8 @@ startup (dropping all outbound traffic except to the proxy), not just by setting
   uses `proxy.env` (below) if you've set one, unaffected by the whitelist.
 - If `proxy.env` configures a corporate proxy, the whitelist proxy chains to it automatically —
   the two aren't mutually exclusive.
-- **Manage it** with `sh run.sh proxy start|stop|status` (per-stack) — `status` prints
-  container health, the whitelisted-domain count, and the last 15 log lines.
-- **Live dashboard** — `sh run.sh proxy status` prints the actual dashboard URL for the
-  current port mapping; open it in a
-  browser for a live-updating view of every allowed/denied connection.
+- **Manage it** with `sh run.sh proxy start|stop|status|clear-log|overview` (per-stack) —
+  `status` prints container health, the whitelisted-domain count, and the last 15 log lines.
 
 See [`AGENTS.md`](AGENTS.md#egress-proxy-and-domain-whitelist) for the full architecture.
 
@@ -154,7 +153,8 @@ sh run.sh logs -v /path/to/project
 ```
 
 Shows every allowed and denied connection Squid has logged. Prompts to pick a stack if more
-than one is running from that directory.
+than one is running from that directory. For a colorized, grouped-by-domain summary instead
+of the raw log, use `sh run.sh proxy overview`.
 
 ### Build only the shared base image
 
