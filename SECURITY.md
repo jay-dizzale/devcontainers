@@ -4,7 +4,7 @@ This repository builds Docker images for local development environments. A
 vulnerability here typically means something that could let a malicious
 actor tamper with what gets installed into those images (e.g. an unverified
 download, a broken checksum/signature check, a secret that leaks into an
-image layer) or compromise the host running `run.sh`/`setup.sh`.
+image layer) or compromise the host running `run.py`.
 
 ## Supported Versions
 
@@ -39,7 +39,7 @@ In scope:
 - `Dockerfile` / `docker-compose.yml` in any environment — build-arg or
   secret handling, base image pinning, anything that could bake a secret
   into an image layer.
-- `run.sh` / `setup.sh` — the host-side launcher and one-time setup script.
+- `run.py` / `devtool/*.py` — the host-side launcher and one-time setup (`run.py setup`).
 
 Out of scope:
 
@@ -47,7 +47,7 @@ Out of scope:
   AWS CLI, Terraform/OpenTofu, etc.) — please report those upstream, to the
   respective project.
 - Issues that require an attacker to already control the host running
-  `run.sh`, or to control environment variables/build args passed to it
+  `run.py`, or to control environment variables/build args passed to it
   (these are treated as trusted input by design).
 - Missing hardening/best-practice suggestions that aren't concretely
   exploitable — feel free to raise those as a regular issue or PR instead.

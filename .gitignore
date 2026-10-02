@@ -5,10 +5,15 @@
 **/.bash_history
 .history/
 
-# Generated from common/zshrc-template by setup.sh — contains your real git
-# identity, so it must never be committed. The template (with placeholder
-# identity) is what's checked in.
+# Generated from common/zshrc-template by `run.py setup` — contains your real
+# git identity, so it must never be committed. The template (with
+# placeholder identity) is what's checked in.
 /common/.zshrc
+
+# Python bytecode cache — devtool/ (and run.py itself) regenerate this on
+# every invocation.
+__pycache__/
+*.pyc
 
 # Credential material
 *.pem
