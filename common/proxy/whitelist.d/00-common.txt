@@ -42,3 +42,5 @@ static.rust-lang.org
 crates.io
 static.crates.io
 index.crates.io
+npmjs.org
+registry.npmjs.org

@@ -3,4 +3,3 @@
 # Node.js apt repo (nodesource) + runtime npm registry
 nodejs.org
 deb.nodesource.com
-registry.npmjs.org

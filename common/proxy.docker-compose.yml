@@ -1,14 +1,15 @@
 # Whitelist-enforcing egress proxy — merged into every stack, alongside each
 # <env>/docker-compose.yml, so every dev container's runtime traffic is
 # forced through it. Wired in three places so no invocation path skips it:
-#   - run.sh: added to the COMPOSE_FILE chain
+#   - run.py: added to the COMPOSE_FILE chain
 #   - <env>/devcontainer.json: added to dockerComposeFile (VS Code)
 #   - manual `docker compose`: pass -f explicitly (see AGENTS.md)
 #
 # Compose resolves relative paths in EVERY merged -f file against the first
 # file's directory, not each file's own directory (verified empirically —
-# see AGENTS.md). The first file is always <env>/docker-compose.yml (run.sh
-# cd's there; devcontainer.json lists it first too), so paths here are
+# see AGENTS.md). The first file is always <env>/docker-compose.yml (run.py
+# runs `docker compose` with cwd set there; devcontainer.json lists it first
+# too), so paths here are
 # written as if relative to <env>/, matching common/base.docker-compose.yml's
 # existing `../common/.zshrc` mount.
 #
