@@ -169,6 +169,15 @@ explicitly allowed, and every request (allowed or denied) is logged.
   any other `common/` change. Edits only take effect on the next container start —
   `docker compose restart proxy` (there's no live-reload: the merge step runs once, in
   `entrypoint.sh`, not on `squid -k reconfigure`).
+- **`whitelist.d/local.txt` is gitignored** and is the *only* file `devtool/proxy.py`'s
+  `do_allow_domain` ever writes to — every "allow a domain" action (Domains tab `a`, Whitelist
+  tab `n`, the non-interactive snapshot's prompt) lands there, never in a tracked file. This is
+  deliberate: a personal/local domain was once added through this tool straight into
+  `00-common.txt` and got committed and pushed. A domain meant to be shared with the team still
+  goes into a tracked `whitelist.d/*.txt` file, but only by someone deliberately editing and
+  committing it by hand — not through the tool. The Whitelist tab shows it as its own "Local"
+  section (`OverviewApp._WHITELIST_GROUP_LABEL`), and `entrypoint.sh` picks it up automatically
+  like any other `whitelist.d/*.txt` file (no `entrypoint.sh` change needed for this).
 - **Logging**: Squid's `access_log` writes every allowed/denied request to a file in the
   `proxy-logs` named volume. `./run.py logs [-v /path] [-f]` tails it (from any directory,
   for the stack mounted from `-v`/cwd — prompts if more than one stack is running from there);

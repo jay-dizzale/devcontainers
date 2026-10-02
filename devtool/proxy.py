@@ -42,6 +42,12 @@ from . import launcher
 from .docker_utils import REPO_ROOT, die, docker, docker_out, proxy_cid_for_project, resolve_stack
 
 WHITELIST_DIR = REPO_ROOT / "common" / "proxy" / "whitelist.d"
+# Where do_allow_domain always writes (see below) — gitignored, so a domain added through the
+# TUI/CLI can never again end up committed into a tracked whitelist.d file by accident (that's
+# exactly what happened once: a personal domain landed in 00-common.txt via this tool and got
+# pushed). A domain meant to be shared with the team still goes into the tracked
+# whitelist.d/*.txt files, but only via someone deliberately editing and committing it by hand.
+WHITELIST_LOCAL_FILE = WHITELIST_DIR / "local.txt"
 
 
 def list_all_stacks():
@@ -139,35 +145,37 @@ def read_domains(path):
 def read_whitelist_entries():
     """All configured domains across every whitelist.d/*.txt — for the Whitelist tab. Includes
     domains never yet requested (unlike the access-log-derived Domains tab rows). Each entry
-    carries a `group` ("common" for 00-common.txt, "specific" for every per-toolbelt file) so
-    the tab can draw them as two visually separated sections rather than one flat,
-    alphabetically-interleaved list — sorting puts every "common" entry before any "specific"
-    one, domain-alphabetical within each group."""
+    carries a `group` ("common" for 00-common.txt, "local" for the gitignored local.txt,
+    "specific" for every per-toolbelt file) so the tab can draw them as visually separated
+    sections rather than one flat, alphabetically-interleaved list — sorting puts every
+    "common" entry first, then "specific", then "local" last, domain-alphabetical within each
+    group."""
     entries = []
     for f in whitelist_files():
-        group = "common" if f.name == "00-common.txt" else "specific"
+        if f.name == "00-common.txt":
+            group = "common"
+        elif f == WHITELIST_LOCAL_FILE:
+            group = "local"
+        else:
+            group = "specific"
         for domain in read_domains(f):
             entries.append({"domain": domain, "file": f.name, "wildcard": domain.startswith("."), "group": group})
-    entries.sort(key=lambda e: (0 if e["group"] == "common" else 1, e["domain"]))
+    order = {"common": 0, "specific": 1, "local": 2}
+    entries.sort(key=lambda e: (order[e["group"]], e["domain"]))
     return entries
 
 
-def do_allow_domain(domain, env=None):
-    if env:
-        target = WHITELIST_DIR / f"{env}.txt"
-        if not target.exists():
-            die(f"No whitelist file for '{env}' — expected {target} (name matches the toolbelt directory, e.g. java-toolbelt)")
-    else:
-        target = WHITELIST_DIR / "00-common.txt"
-
+def do_allow_domain(domain):
+    """Always writes to the gitignored WHITELIST_LOCAL_FILE — see its module-level comment for
+    why this tool never writes to a tracked whitelist.d file anymore."""
     hits = [f for f in whitelist_files() if domain in read_domains(f)]
     if hits:
         names = " ".join(f.name for f in hits)
         print(f"ℹ️  '{domain}' is already whitelisted (in {names}).")
     else:
-        with target.open("a") as fh:
+        with WHITELIST_LOCAL_FILE.open("a") as fh:
             fh.write(domain + "\n")
-        print(f"✅ Added '{domain}' to {target.name}.")
+        print(f"✅ Added '{domain}' to {WHITELIST_LOCAL_FILE.name} (local — not tracked by git).")
     restart_running_proxies()
 
 
@@ -302,11 +310,11 @@ def run_snapshot(cid, env, project, workspace):
         print("\n".join(format_domain_table(rows)))
     print()
     try:
-        new_domain = input(f"➕ Add a domain to '{env}'s whitelist (Enter to skip): ").strip()
+        new_domain = input("➕ Add a domain to local.txt (not tracked by git; Enter to skip): ").strip()
     except EOFError:
         new_domain = ""
     if new_domain:
-        do_allow_domain(new_domain, env)
+        do_allow_domain(new_domain)
 
 
 def run_follow(cid, env, project, workspace):
@@ -559,6 +567,7 @@ class OverviewApp:
     _WHITELIST_GROUP_LABEL = {
         "common": "── Common (00-common.txt — every environment) ──",
         "specific": "── Specific (per-environment whitelist.d/*.txt) ──",
+        "local": "── Local (local.txt — gitignored, this machine only) ──",
     }
 
     def _draw_whitelist_tab(self, stdscr, top, height, x0, w):
@@ -656,7 +665,7 @@ class OverviewApp:
         elif key in (ord("d"), ord("D")) and self.current_tab() == TAB_STACKS:
             self._delete_selected_stack(stdscr)
         elif key in (ord("a"), ord("A")) and self.current_tab() == TAB_DOMAINS:
-            self._allow_selected(stdscr)
+            self._allow_selected()
         elif key in (ord("b"), ord("B")) and self.current_tab() == TAB_DOMAINS:
             self._block_selected_domain()
         elif key in (ord("b"), ord("B")) and self.current_tab() == TAB_WHITELIST:
@@ -727,9 +736,9 @@ class OverviewApp:
         return False
 
     def _new_stack_modal(self, stdscr):
-        """Runs its own small blocking event loop — like _prompt_new_domain/
-        _prompt_new_domain_target — rather than wiring into draw()/handle_key(), since it's a
-        one-shot modal that owns input until confirmed or cancelled. Returns
+        """Runs its own small blocking event loop — like _prompt_new_domain — rather than
+        wiring into draw()/handle_key(), since it's a one-shot modal that owns input until
+        confirmed or cancelled. Returns
         {"compose_dir": Path, "folder": str} or None (Esc)."""
         env_dirs = launcher.discover_env_dirs()
         if not env_dirs:
@@ -914,8 +923,7 @@ class OverviewApp:
         """'d': the same teardown as `dev stop`/`run.py stop` (containers, networks, and
         anonymous volumes removed) — unlike 'b', which only stops the proxy container and
         leaves everything else in place. Destructive and irreversible, so it asks for
-        confirmation first (bare Esc — no arrow-sequence follow-up expected here, same as
-        _prompt_new_domain_target)."""
+        confirmation first (bare Esc — no arrow-sequence follow-up expected here)."""
         s = self._selected_stack()
         if not s:
             return
@@ -958,7 +966,7 @@ class OverviewApp:
         self._show_output_modal(stdscr, f"docker compose down -v — {s['env']}", body)
 
     # -- Domains tab --------------------------------------------------------
-    def _allow_selected(self, stdscr):
+    def _allow_selected(self):
         rows = self.rows[TAB_DOMAINS]
         if not rows or self.idx[TAB_DOMAINS] >= len(rows):
             return
@@ -966,15 +974,10 @@ class OverviewApp:
         if r["verdict"] != "BLOCKED":
             self.message = f"ℹ️  '{r['host']}' is already allowed."
             return
-        choice = self._prompt_new_domain_target(stdscr, r["host"])
-        if choice is None:
-            self.message = "Cancelled."
-            return
-        target_env = None if choice == "__common__" else choice
         with _quiet_stdout():
-            do_allow_domain(r["host"], target_env)
+            do_allow_domain(r["host"])
         self.refresh()
-        self.message = f"✅ Allowed '{r['host']}'."
+        self.message = f"✅ Allowed '{r['host']}' (local.txt — not tracked by git)."
 
     def _block_selected_domain(self):
         rows = self.rows[TAB_DOMAINS]
@@ -1030,42 +1033,10 @@ class OverviewApp:
         if not domain:
             return
 
-        choice = self._prompt_new_domain_target(stdscr, domain)
-        if choice is None:
-            self.message = "Cancelled."
-            return
-
-        target_env = None if choice == "__common__" else choice
         with _quiet_stdout():
-            do_allow_domain(domain, target_env)
+            do_allow_domain(domain)
         self.refresh()
-        dest = "00-common.txt" if target_env is None else f"{target_env}.txt"
-        self.message = f"✅ Added '{domain}' to {dest}."
-
-    def _prompt_new_domain_target(self, stdscr, domain):
-        """Asks whether `domain` belongs in the shared 00-common.txt (every environment) or
-        this stack's own <env>-toolbelt.txt — picking wrong silently over- or under-shares a
-        domain, so this is a required step rather than a default. Returns None for common
-        (matching do_allow_domain's own env=None convention), self.env for this environment's
-        file, or "cancel" sentinel turned into None by the caller on Esc."""
-        h, w = stdscr.getmaxyx()
-        prompt = f"Add '{domain}' to:  [c] 00-common.txt (every environment)   [s] {self.env}.txt (this one only)   [Esc] cancel"
-        stdscr.addnstr(h - 1, 0, " " * (w - 1), w - 1)
-        stdscr.addnstr(h - 1, 0, prompt, w - 1, curses.A_BOLD)
-        stdscr.refresh()
-
-        stdscr.timeout(-1)  # block for the choice — resumed by the caller's loop afterward
-        try:
-            while True:
-                key = stdscr.getch()
-                if key in (ord("c"), ord("C")):
-                    return "__common__"
-                if key in (ord("s"), ord("S")):
-                    return self.env
-                if key == 27:  # bare Esc — no arrow-sequence follow-up expected here
-                    return None
-        finally:
-            stdscr.timeout(200)
+        self.message = f"✅ Added '{domain}' to local.txt (not tracked by git)."
 
 
 _ARROW_BY_FINAL_BYTE = {

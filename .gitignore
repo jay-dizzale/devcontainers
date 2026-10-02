@@ -10,6 +10,13 @@
 # placeholder identity) is what's checked in.
 /common/.zshrc
 
+# Where the Stacks TUI's/CLI's "allow a domain" actions always write
+# (devtool/proxy.py's do_allow_domain) — personal/local whitelist additions must
+# never land in a tracked whitelist.d file again. A domain meant to be shared
+# with the team still goes into the tracked whitelist.d/*.txt files, but only
+# by editing and committing it by hand.
+/common/proxy/whitelist.d/local.txt
+
 # Python bytecode cache — devtool/ (and run.py itself) regenerate this on
 # every invocation.
 __pycache__/
