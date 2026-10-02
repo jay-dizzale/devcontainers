@@ -7,12 +7,12 @@ what the `dev()` shell function set up by `run.py setup` always prepends:
 — argparse's subparsers don't model that shape naturally, so a manual walk mirrors run.sh's
 own loop instead.
 
-There is no `proxy` subcommand: bare `run.py` (no subcommand at all) launches the 4-tab
-Stacks/Domains/Whitelist/Access-log app directly (devtool/proxy.py). Its Stacks tab lists
-every existing devcontainer stack host-wide (`dev` is invoked from all over the place, so this
-is never scoped to "the current directory") and its 'n' action is now the environment picker
-that used to be a separate plain-text prompt here, for whichever directory `run.py` itself was
-invoked from.
+There is no `proxy` subcommand: bare `run.py` (no subcommand at all) launches the two-pane
+Stacks / Domain Statistics-Global Whitelist-Custom Whitelist-Access log app directly
+(devtool/proxy.py). Its Stacks pane lists every existing devcontainer stack host-wide (`dev`
+is invoked from all over the place, so this is never scoped to "the current directory") and
+its 'n' action is now the environment picker that used to be a separate plain-text prompt
+here, for whichever directory `run.py` itself was invoked from.
 """
 import os
 from pathlib import Path
@@ -25,34 +25,43 @@ run.py — Interactive launcher for docker-compose devcontainer stacks.
 
 Usage:
   ./run.py [-v /path/to/mount] [-r] [--debug] [-f]
-      Opens a 4-tab app (←/→ or 1-4 to switch, q/Ctrl-C to quit):
-        1 Stacks     — every devcontainer stack that already exists,
+      Opens a two-pane app — Stacks always on the left, Proxy settings on
+      the right (Tab/←/→ to move between the 5 positions, 1-4 to jump
+      straight to a proxy sub-tab, q/Ctrl-C to quit):
+        Stacks           — every devcontainer stack that already exists,
                        host-wide (not just this directory — `dev` gets
-                       run from all over the place), RUNNING/STOPPED; ➤
-                       marks the one the other tabs operate on, → marks
-                       the cursor. ↑/↓ select, `o` open a shell in the
-                       selected one (builds/starts it first if needed),
-                       `n` start a brand-new environment for the current
-                       directory (prompts which toolbelt), Enter switch
-                       the active stack without opening a shell, `a`
-                       start its proxy, `b` stop it (blocks that stack's
-                       dev egress until started again).
-        2 Domains    — every domain seen for the active stack, hits, live
-                       ALLOWED/BLOCKED, last seen. ↑/↓ select, `a` allow if
-                       BLOCKED, `b` block if ALLOWED.
-        3 Whitelist  — every domain actually configured (not just ones
-                       seen), which file, exact vs. wildcard. ↑/↓ select,
-                       `b` removes it, `n` prompts for a brand-new domain
-                       (then asks: common to every environment, or just
-                       this one?).
-        4 Access log — the raw, timestamped log for the active stack,
+                       run from all over the place), one bordered card
+                       each with its type, RUNNING/STOPPED, id, workspace;
+                       ➤ marks the one the Proxy pane operates on. ↑/↓
+                       select, `o` open a shell in the selected one
+                       (builds/starts it first if needed), `n` (or Enter
+                       on the trailing "+ New stack" card) opens a modal
+                       to start a brand-new environment for a chosen
+                       folder, Enter switch the active stack without
+                       opening a shell, `a` start its proxy, `b` stop it
+                       (blocks that stack's dev egress until started
+                       again), `d` tear the whole stack down (confirm
+                       first; same as `dev stop`, not the same as `b`).
+        1 Domain Stats   — every domain seen for the active stack, hits,
+                       live ALLOWED/BLOCKED, last seen. ↑/↓ select, `a`
+                       allow if BLOCKED (always into your personal,
+                       gitignored local.txt), `b` block if ALLOWED.
+        2 Global WL      — every domain in the shared, committed whitelist
+                       files only, which file, exact vs. wildcard. ↑/↓
+                       select, `b` removes it, `n` prompts for a brand-new
+                       domain then asks: common to every environment, or
+                       just this one?
+        3 Custom WL      — every domain in your own personal, gitignored
+                       local.txt. ↑/↓ select, `n` adds (no further prompt
+                       — there's only one target), `b` removes it.
+        4 Access log     — the raw, timestamped log for the active stack,
                        auto-following until you scroll up (↑/↓); `c`
                        clears it in place.
       -r/--debug apply to whatever environment you `o`-pen. -f: passive —
-      redraws Tab 2's table every 2s, no key handling, for piping/logging
-      or just watching without the controls (Ctrl-C to stop).
-      Piped/non-terminal output (and no -f): one-shot snapshot of Tab 2
-      plus an "add a domain" prompt.
+      redraws the Domain Stats table every 2s, no key handling, for
+      piping/logging or just watching without the controls (Ctrl-C to
+      stop). Piped/non-terminal output (and no -f): one-shot snapshot of
+      Domain Stats plus an "add a domain" prompt (also always local.txt).
 
   ./run.py setup
       One-time host setup: git identity, container shell config, CA
@@ -169,7 +178,7 @@ def _run_generic(args, invocation_dir):
         print(f"✅ Base image {launcher.BASE_IMAGE} is ready.")
         return 0
 
-    # No subcommand: the unified Stacks/Domains/Whitelist/Access-log app. Its Stacks tab's 'n'
+    # No subcommand: the unified two-pane Stacks / proxy-settings app. Its Stacks pane's 'n'
     # action now covers what the old plain-text environment picker did, so there's nothing
     # further to branch on here.
     proxy.cmd_overview(volume, follow, rebuild, debug)

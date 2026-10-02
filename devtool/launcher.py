@@ -1,9 +1,10 @@
 """devtool/launcher.py — `stop`/`list`/`logs`/`build-base`, plus the build+start+open-shell
 logic (`start_and_open_shell`) that both the bare `run.py` picker fallback (non-tty) and the
-Stacks tab's 'o' action in devtool/proxy.py call into. Direct Python port of the previous
+Stacks pane's 'o' action in devtool/proxy.py call into. Direct Python port of the previous
 POSIX-sh `run.sh`'s own logic (everything except `proxy`'s own UI, which lives in
-devtool/proxy.py — the default interactive entry point is now that 4-tab app, with the Stacks
-tab doubling as the environment picker — and one-time host setup, in devtool/hostsetup.py).
+devtool/proxy.py — the default interactive entry point is now that two-pane app, with the
+Stacks pane doubling as the environment picker — and one-time host setup, in
+devtool/hostsetup.py).
 
 Stdlib only — every Docker interaction shells out to the `docker`/`docker compose` CLI via
 devtool/docker_utils.py, no SDK.

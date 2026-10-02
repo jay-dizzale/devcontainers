@@ -1,15 +1,15 @@
 """devtool/proxy.py — the two-pane app that bare `run.py` launches by default: Stacks
-permanently on the left (1/3 width), proxy settings (Domains/Whitelist/Access log, their own
-small sub-tab bar) permanently on the right (2/3 width). There is no separate `proxy`
-subcommand anymore. The Stacks pane lists every devcontainer stack that already exists,
-host-wide (`dev`/`run.py` gets invoked from all over the place, so this is never scoped to
-"the current directory") — `o` on a row opens a shell in it (building/starting first if
-needed), `n` starts a brand-new environment for the directory `run.py` was invoked from (the
-plain-text picker that used to be bare `run.py`'s whole job). Both tear the TUI down first
-since a real interactive zsh session can't run inside curses' alternate screen. start/stop/
-clear-log/allow are actions inside whichever pane/sub-tab is focused (Stacks for start/stop,
-Access log for clear, Whitelist for allow), so there's exactly one thing to remember how to
-invoke: `run.py`.
+permanently on the left (1/3 width), proxy settings (Domain Statistics/Global Whitelist/
+Custom Whitelist/Access log, their own small sub-tab bar) permanently on the right (2/3
+width). There is no separate `proxy` subcommand anymore. The Stacks pane lists every
+devcontainer stack that already exists, host-wide (`dev`/`run.py` gets invoked from all over
+the place, so this is never scoped to "the current directory") — `o` on a row opens a shell
+in it (building/starting first if needed), `n` starts a brand-new environment for the
+directory `run.py` was invoked from (the plain-text picker that used to be bare `run.py`'s
+whole job). Both tear the TUI down first since a real interactive zsh session can't run
+inside curses' alternate screen. start/stop/clear-log/allow are actions inside whichever
+pane/sub-tab is focused (Stacks for start/stop, Access log for clear, Global/Custom Whitelist
+for allow/remove), so there's exactly one thing to remember how to invoke: `run.py`.
 
 Moved here from common/proxy/ctl.py when `run.sh`/`setup.sh` were rewritten as the unified
 `devtool` package + `run.py` — `common/` stays container-build/runtime material only (the
@@ -142,41 +142,67 @@ def read_domains(path):
     return out
 
 
-def read_whitelist_entries():
-    """All configured domains across every whitelist.d/*.txt — for the Whitelist tab. Includes
-    domains never yet requested (unlike the access-log-derived Domains tab rows). Each entry
-    carries a `group` ("common" for 00-common.txt, "local" for the gitignored local.txt,
-    "specific" for every per-toolbelt file) so the tab can draw them as visually separated
-    sections rather than one flat, alphabetically-interleaved list — sorting puts every
-    "common" entry first, then "specific", then "local" last, domain-alphabetical within each
-    group."""
+def read_global_whitelist_entries():
+    """Entries from the TRACKED whitelist.d files only (00-common.txt + per-env
+    *-toolbelt.txt) — excludes the gitignored local.txt. Backs the Global Whitelist tab, which
+    is for deliberately editing/committing shared config, not quick local additions. Each
+    entry carries a `group` ("common" for 00-common.txt, "specific" for every per-toolbelt
+    file) so the tab can draw them as two visually separated sections — sorting puts every
+    "common" entry before any "specific" one, domain-alphabetical within each group."""
     entries = []
     for f in whitelist_files():
-        if f.name == "00-common.txt":
-            group = "common"
-        elif f == WHITELIST_LOCAL_FILE:
-            group = "local"
-        else:
-            group = "specific"
+        if f == WHITELIST_LOCAL_FILE:
+            continue
+        group = "common" if f.name == "00-common.txt" else "specific"
         for domain in read_domains(f):
             entries.append({"domain": domain, "file": f.name, "wildcard": domain.startswith("."), "group": group})
-    order = {"common": 0, "specific": 1, "local": 2}
-    entries.sort(key=lambda e: (order[e["group"]], e["domain"]))
+    entries.sort(key=lambda e: (0 if e["group"] == "common" else 1, e["domain"]))
     return entries
 
 
-def do_allow_domain(domain):
-    """Always writes to the gitignored WHITELIST_LOCAL_FILE — see its module-level comment for
-    why this tool never writes to a tracked whitelist.d file anymore."""
+def read_custom_whitelist_entries():
+    """Entries from the gitignored local.txt only — backs the Custom Whitelist tab (personal,
+    never-committed additions; see WHITELIST_LOCAL_FILE's module-level comment)."""
+    if not WHITELIST_LOCAL_FILE.exists():
+        return []
+    return [
+        {"domain": d, "file": WHITELIST_LOCAL_FILE.name, "wildcard": d.startswith(".")}
+        for d in read_domains(WHITELIST_LOCAL_FILE)
+    ]
+
+
+def _write_new_domain(target, domain):
     hits = [f for f in whitelist_files() if domain in read_domains(f)]
     if hits:
         names = " ".join(f.name for f in hits)
         print(f"ℹ️  '{domain}' is already whitelisted (in {names}).")
-    else:
-        with WHITELIST_LOCAL_FILE.open("a") as fh:
-            fh.write(domain + "\n")
-        print(f"✅ Added '{domain}' to {WHITELIST_LOCAL_FILE.name} (local — not tracked by git).")
+        return
+    with target.open("a") as fh:
+        fh.write(domain + "\n")
+    print(f"✅ Added '{domain}' to {target.name}.")
     restart_running_proxies()
+
+
+def do_allow_domain(domain):
+    """Local/personal only — always writes to the gitignored WHITELIST_LOCAL_FILE. Used by the
+    Domain Statistics tab's quick 'allow' action and the Custom Whitelist tab's 'n' — see
+    WHITELIST_LOCAL_FILE's module-level comment for why this tool never writes to a tracked
+    whitelist.d file through either of those."""
+    _write_new_domain(WHITELIST_LOCAL_FILE, domain)
+
+
+def do_allow_domain_global(domain, env=None):
+    """Deliberately edits a TRACKED whitelist file — only the Global Whitelist tab's 'n'
+    action calls this, after asking whether the domain belongs in the shared 00-common.txt or
+    this stack's own <env>-toolbelt.txt. Never used for a quick/local allow (do_allow_domain
+    above is for that)."""
+    if env:
+        target = WHITELIST_DIR / f"{env}.txt"
+        if not target.exists():
+            die(f"No whitelist file for '{env}' — expected {target} (name matches the toolbelt directory, e.g. java-toolbelt)")
+    else:
+        target = WHITELIST_DIR / "00-common.txt"
+    _write_new_domain(target, domain)
 
 
 def do_block_domain(domain):
@@ -203,7 +229,8 @@ def do_block_domain(domain):
 
 
 # ---------------------------------------------------------------------------
-# access.log / live-whitelist parsing — for Tab 1 (per-domain) and Tab 3 (raw).
+# access.log / live-whitelist parsing — for the Domain Statistics (per-domain) and
+# Access log (raw) sub-tabs.
 # Squid's log fields: <epoch>.<ms> <elapsed> <client> <code>/<status> <bytes>
 # <method> <url> <ident> <hierarchy>/<peer> <mime-type>. See
 # common/proxy/squid.conf for the full layout.
@@ -289,7 +316,7 @@ def fetch_domain_rows(cid, log_rows=None):
 
 # ---------------------------------------------------------------------------
 # The bare `proxy` command — three modes: piped/non-tty snapshot, passive --follow, or the
-# interactive 4-tab curses app.
+# interactive two-pane curses app.
 # ---------------------------------------------------------------------------
 def format_domain_table(rows):
     lines = [f"   {'DOMAIN':<40} {'HITS':>6}  {'STATUS':<9} LAST SEEN"]
@@ -337,12 +364,16 @@ def run_follow(cid, env, project, workspace):
         print("👋 Stopped watching.")
 
 
-TAB_STACKS, TAB_DOMAINS, TAB_WHITELIST, TAB_LOG = range(4)
+TAB_STACKS, TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG = range(5)
 
-# The right-hand "proxy settings" pane keeps its own small sub-tab bar — Stacks is no longer
-# one of the four tabs, it's the permanent left pane (see OverviewApp.draw).
-PROXY_TABS = [TAB_DOMAINS, TAB_WHITELIST, TAB_LOG]
-PROXY_TAB_TITLES = [" 1:Domains ", " 2:Whitelist ", " 3:Access log "]
+# The right-hand "proxy settings" pane keeps its own small sub-tab bar — Stacks is the
+# permanent left pane (see OverviewApp.draw), not one of these. TAB_WHITELIST ("Global
+# Whitelist") shows/edits only the TRACKED whitelist.d files (00-common.txt + per-env
+# *-toolbelt.txt); TAB_CUSTOM ("Custom Whitelist") shows/edits only the gitignored local.txt
+# — see read_global_whitelist_entries/read_custom_whitelist_entries and
+# do_allow_domain/do_allow_domain_global.
+PROXY_TABS = [TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG]
+PROXY_TAB_TITLES = [" 1:Domain Stats ", " 2:Global WL ", " 3:Custom WL ", " 4:Access log "]
 
 
 @contextlib.contextmanager
@@ -357,11 +388,32 @@ def _quiet_stdout():
         yield
 
 
+def _safe_addnstr(stdscr, y, x, s, n, attr=0):
+    """addnstr wrapper that no-ops instead of raising when the write would fall outside the
+    window. `max(0, width - x)`-style clamping at a call site only protects the *length*
+    (`n`); ncurses still returns ERR (uncaught -> crash) when the *start* column/row itself is
+    already at or past the last valid one — confirmed via a real crash: the sub-tab bar's
+    running `x` offset walks past the right edge in a narrow terminal (or even a moderately
+    narrow one with several tabs), and every title drawn after that point raised
+    `_curses.error: addnwstr() returned ERR` with nothing to catch it. Centralizing the bounds
+    check here means every draw call site is safe by construction instead of each one needing
+    its own — the same class of bug that already motivated the try/except around the Stacks
+    tab's card borders, just applied everywhere `addnstr` is used."""
+    h, w = stdscr.getmaxyx()
+    if y < 0 or y >= h or x < 0 or x >= w or n <= 0:
+        return
+    try:
+        stdscr.addnstr(y, x, s, min(n, w - x), attr)
+    except curses.error:
+        pass
+
+
 class OverviewApp:
     """The interactive curses app behind the bare `proxy` command: a permanent two-pane
-    split — Stacks always visible on the left 1/3, the proxy settings (Domains/Whitelist/
-    Access log, switchable via their own sub-tab bar) on the right 2/3. Exactly one pane has
-    input focus at a time (self.focus); Tab/←/→ moves focus between the two panes."""
+    split — Stacks always visible on the left 1/3, the proxy settings (Domain Statistics/
+    Global Whitelist/Custom Whitelist/Access log, switchable via their own sub-tab bar) on
+    the right 2/3. Exactly one pane has input focus at a time (self.focus); Tab/←/→ moves
+    focus between the two panes."""
 
     def __init__(self, cid, env, project, workspace, target_dir):
         self.cid = cid
@@ -371,10 +423,10 @@ class OverviewApp:
         self.target_dir = target_dir  # fixed: where 'n' (new stack) builds/starts into
         self.focus = "stacks"         # "stacks" (left pane) or "proxy" (right pane)
         self.proxy_tab = TAB_DOMAINS  # which sub-tab the right pane currently shows
-        self.idx = [0, 0, 0, 0]       # selected row, per tab (log tab unused — it scrolls)
-        self.scroll = [0, 0, 0]       # stacks/domains/whitelist: first visible row (viewport top)
+        self.idx = [0, 0, 0, 0, 0]    # selected row, per tab (log tab unused — it scrolls)
+        self.scroll = [0, 0, 0, 0]    # stacks/domains/whitelist/custom: first visible row (viewport top)
         self.log_offset = 0           # log tab: 0 = pinned to newest ("following")
-        self.rows = [[], [], [], []]
+        self.rows = [[], [], [], [], []]
         self.message = ""
         self.last_refresh = 0.0
         self.pending_action = None    # set by 'o' (open shell) — breaks the main loop to act on
@@ -386,10 +438,10 @@ class OverviewApp:
         return TAB_STACKS if self.focus == "stacks" else self.proxy_tab
 
     def _pane_pos(self):
-        """Linear position along Stacks(0) → Domains(1) → Whitelist(2) → Access log(3), so
-        ←/→ can walk through all four one step at a time — all the way right into the last
-        sub-tab, then back out to Stacks by going left — instead of only toggling between
-        the two panes."""
+        """Linear position along Stacks(0) → Domain Stats(1) → Global WL(2) → Custom WL(3) →
+        Access log(4), so ←/→ can walk through all five one step at a time — all the way
+        right into the last sub-tab, then back out to Stacks by going left — instead of only
+        toggling between the two panes."""
         if self.focus == "stacks":
             return 0
         return 1 + PROXY_TABS.index(self.proxy_tab)
@@ -407,9 +459,10 @@ class OverviewApp:
         log_rows = parse_access_log(self.cid) if self.cid else []
         self.rows[TAB_LOG] = log_rows
         self.rows[TAB_DOMAINS] = fetch_domain_rows(self.cid, log_rows) if self.cid else []
-        self.rows[TAB_WHITELIST] = read_whitelist_entries()
+        self.rows[TAB_WHITELIST] = read_global_whitelist_entries()
+        self.rows[TAB_CUSTOM] = read_custom_whitelist_entries()
         self.last_refresh = time.time()
-        for i in (TAB_DOMAINS, TAB_WHITELIST):
+        for i in (TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM):
             if self.rows[i]:
                 self.idx[i] = min(self.idx[i], len(self.rows[i]) - 1)
             else:
@@ -427,35 +480,35 @@ class OverviewApp:
         name = " devcontainers "
         pad = max(0, w - len(name))
         sep = ("─" * (pad // 2)) + name + ("─" * (pad - pad // 2))
-        stdscr.addnstr(0, 0, sep[:w], w, curses.A_BOLD)
+        _safe_addnstr(stdscr, 0, 0, sep[:w], w, curses.color_pair(3) | curses.A_BOLD)
 
         credit = " made by jay-dizzale 🐳 "
         if len(credit) < w:
-            stdscr.addnstr(0, w - len(credit), credit, len(credit), curses.A_DIM)
+            _safe_addnstr(stdscr, 0, w - len(credit), credit, len(credit), curses.color_pair(4) | curses.A_DIM)
 
         left_w = max(18, w // 3)
         divider_x = min(left_w, w - 1)
         right_x = divider_x + 1
         right_w = max(5, w - right_x)
 
-        stacks_attr = curses.A_REVERSE if self.focus == "stacks" else curses.A_BOLD
-        stdscr.addnstr(1, 0, " STACKS ".ljust(left_w), left_w, stacks_attr)
+        stacks_attr = (curses.color_pair(3) | curses.A_REVERSE) if self.focus == "stacks" else (curses.color_pair(3) | curses.A_BOLD)
+        _safe_addnstr(stdscr, 1, 0, " STACKS ".ljust(left_w), left_w, stacks_attr)
 
-        proxy_attr = curses.A_REVERSE if self.focus == "proxy" else curses.A_BOLD
-        stdscr.addnstr(1, right_x, " PROXY ".ljust(right_w), max(0, right_w), proxy_attr)
+        proxy_attr = (curses.color_pair(3) | curses.A_REVERSE) if self.focus == "proxy" else (curses.color_pair(3) | curses.A_BOLD)
+        _safe_addnstr(stdscr, 1, right_x, " PROXY ".ljust(right_w), max(0, right_w), proxy_attr)
 
         x = right_x
         for tab_const, title in zip(PROXY_TABS, PROXY_TAB_TITLES):
             focused_here = self.focus == "proxy" and tab_const == self.proxy_tab
-            attr = curses.A_REVERSE if focused_here else curses.A_NORMAL
-            stdscr.addnstr(2, x, title, max(0, right_x + right_w - x), attr)
+            attr = (curses.color_pair(3) | curses.A_REVERSE) if focused_here else curses.color_pair(3)
+            _safe_addnstr(stdscr, 2, x, title, max(0, right_x + right_w - x), attr)
             x += len(title) + 1
 
         body_top = 4
         body_h = h - body_top - 2
         for y in range(1, body_top + body_h):
             try:
-                stdscr.addch(y, divider_x, "│")
+                stdscr.addch(y, divider_x, "│", curses.color_pair(3) | curses.A_DIM)
             except curses.error:
                 pass  # bottom-right-cell write restriction — harmless to skip
 
@@ -465,11 +518,13 @@ class OverviewApp:
             self._draw_domain_tab(stdscr, body_top, body_h, right_x, right_w)
         elif self.proxy_tab == TAB_WHITELIST:
             self._draw_whitelist_tab(stdscr, body_top, body_h, right_x, right_w)
+        elif self.proxy_tab == TAB_CUSTOM:
+            self._draw_custom_whitelist_tab(stdscr, body_top, body_h, right_x, right_w)
         else:
             self._draw_log_tab(stdscr, body_top, body_h, right_x, right_w)
 
         footer = self.message or self._footer_hint()
-        stdscr.addnstr(h - 1, 0, footer[: w - 1], w - 1)
+        _safe_addnstr(stdscr, h - 1, 0, footer[: w - 1], w - 1)
         stdscr.refresh()
 
     def _footer_hint(self):
@@ -477,23 +532,28 @@ class OverviewApp:
         tab = self.current_tab()
         if tab == TAB_STACKS:
             return f"↑/↓ select · o open shell · n new stack · Enter switch/new · a start proxy · b stop proxy · d delete stack · {common}"
-        sub = "1/2/3 sub-tab · "
+        sub = "1/2/3/4 sub-tab · "
         if tab == TAB_DOMAINS:
-            return f"↑/↓ select · a allow · b block · {sub}{common}"
+            return f"↑/↓ select · a allow (→ local.txt) · b block · {sub}{common}"
         if tab == TAB_WHITELIST:
-            return f"↑/↓ select · b remove · n new domain · {sub}{common}"
+            return f"↑/↓ select · n new (common/env, tracked) · b remove · {sub}{common}"
+        if tab == TAB_CUSTOM:
+            return f"↑/↓ select · n new (local.txt) · b remove · {sub}{common}"
         return f"↑/↓ scroll · c clear log · {sub}{common}"
 
-    def _visible_window(self, tab, n_rows, height, lines_per_row=1):
+    def _visible_window(self, tab, n_rows, height, lines_per_row=1, header_rows=1):
         """Clamp-to-view scrolling: keeps self.idx[tab] inside [scroll, scroll+visible)
         by adjusting self.scroll[tab], then returns (start, visible) for the caller to
         slice rows[start:start+visible]. Without this, a selection moved past the first
         screenful of rows was simply never drawn — the row count and height could each
         change between calls (fresh traffic, terminal resize), so both are re-clamped
         every draw rather than cached. `lines_per_row` lets a caller whose entries span
-        several terminal lines (the Stacks tab's 3-line-per-stack layout) count scroll
-        position in entries while still budgeting the right number of terminal rows."""
-        visible = max(1, (height - 1) // lines_per_row)
+        several terminal lines (the Stacks tab's card layout) count scroll position in
+        entries while still budgeting the right number of terminal rows. `header_rows`
+        reserves that many rows for a column header the caller draws at `top` — the Stacks
+        tab passes 0 since its cards have no such header (the type is in the card's own
+        border instead)."""
+        visible = max(1, (height - header_rows) // lines_per_row)
         scroll = self.scroll[tab]
         idx = self.idx[tab]
         if idx < scroll:
@@ -504,54 +564,81 @@ class OverviewApp:
         self.scroll[tab] = scroll
         return scroll, visible
 
-    _STACK_ENTRY_LINES = 5  # bordered card: top border, type/status, id, workspace, bottom border
+    _STACK_ENTRY_LINES = 4  # bordered card: top border, status+id line, workspace, bottom border
+
+    @staticmethod
+    def _card_top_border(card_w, label):
+        """The top border with the stack's env type embedded top-right (" java-toolbelt ")
+        instead of a separate TYPE column header, which never fit a card layout (it described
+        a single column while each card spans the whole row). No label (the "+ New stack"
+        pseudo-card) falls back to a plain border."""
+        avail = max(0, card_w - 2)
+        if not label:
+            return "┌" + "─" * avail + "┐"
+        text = f" {label} "[: max(0, avail - 1)]  # keep >=1 dash before the right corner
+        left_len = max(0, avail - len(text) - 1)
+        return "┌" + "─" * left_len + text + "─┐"
 
     def _draw_stacks_tab(self, stdscr, top, height, x0, w):
         """The list always has one extra trailing row — "+ New stack" — past the real stacks,
         so starting a new one is just another list item (Enter on it) rather than only a
         separate key ('n' still works too, from anywhere in this pane). Each stack is its own
-        bordered card (type/status, stack id, workspace folder) rather than a plain row, for
-        visual separation in the narrow left pane. Selection reverses only the card's border —
-        reversing the content too (status colors, dimmed id/workspace) looked noisy."""
+        bordered card: its env type sits in the top border (top-right, see
+        _card_top_border), its first content line has the ➤ active-stack marker and the
+        stack id together on the left and the proxy's live state ("PROXY ACTIVE"/"PROXY
+        INACTIVE", colored) right-aligned, then the workspace folder on its own line. No
+        plain column header above the cards — a single-column header never matched a card
+        layout. Selection highlights only the card's border (bold yellow instead of the
+        surrounding cyan) — a reverse-video border looked like a filled shadow block, and
+        reversing the content too (status colors, dimmed id/workspace) looked noisy on top of
+        that."""
         rows = self.rows[TAB_STACKS]
-        stdscr.addnstr(top, x0 + 2, f"{'TYPE':<20} STATUS", max(0, w - 2), curses.A_UNDERLINE)
         total = len(rows) + 1
         lines = self._STACK_ENTRY_LINES
-        start, visible = self._visible_window(TAB_STACKS, total, height, lines_per_row=lines)
+        start, visible = self._visible_window(TAB_STACKS, total, height, lines_per_row=lines, header_rows=0)
         card_w = max(4, w - 3)
 
         for row_i in range(start, min(start + visible, total)):
-            y = top + 1 + (row_i - start) * lines
+            y = top + (row_i - start) * lines
             selected = row_i == self.idx[TAB_STACKS]
-            border_attr = curses.A_REVERSE if selected else curses.A_NORMAL
+            border_attr = (curses.color_pair(4) | curses.A_BOLD) if selected else curses.color_pair(3)
+            is_new_row = row_i == len(rows)
+            label = None if is_new_row else rows[row_i]["env"]
             try:
-                stdscr.addnstr(y, x0 + 1, "┌" + "─" * (card_w - 2) + "┐", card_w, border_attr)
-                stdscr.addnstr(y + 4, x0 + 1, "└" + "─" * (card_w - 2) + "┘", card_w, border_attr)
-                for ln in range(1, 4):
+                _safe_addnstr(stdscr, y, x0 + 1, self._card_top_border(card_w, label), card_w, border_attr)
+                _safe_addnstr(stdscr, y + 3, x0 + 1, "└" + "─" * (card_w - 2) + "┘", card_w, border_attr)
+                for ln in range(1, 3):
                     stdscr.addch(y + ln, x0 + 1, "│", border_attr)
                     stdscr.addch(y + ln, x0 + card_w, "│", border_attr)
             except curses.error:
                 pass  # card clipped by the pane edge — harmless to skip
 
-            if row_i == len(rows):
-                stdscr.addnstr(y + 2, x0 + 3, "+ New stack", max(0, card_w - 4), curses.A_BOLD)
+            if is_new_row:
+                _safe_addnstr(stdscr, y + 1, x0 + 3, "+ New stack", max(0, card_w - 4), curses.color_pair(4) | curses.A_BOLD)
                 continue
 
             s = rows[row_i]
-            marker = "➤" if s["project"] and s["project"] == self.project else " "
+            is_active = s["project"] and s["project"] == self.project
+            running = s["status"] == "RUNNING"
             # Content attrs never change with selection — only the border (above) does, so
             # the highlight reads as "this card" rather than painting the text too.
-            main_attr = curses.color_pair(1) if s["status"] == "RUNNING" else curses.color_pair(2)
+            status_attr = curses.color_pair(1) if running else curses.color_pair(2)
             detail_attr = curses.A_DIM
-            stdscr.addnstr(y + 1, x0 + 3, f"{marker}{s['env']:<16} {s['status']}", max(0, card_w - 4), main_attr)
-            stdscr.addnstr(y + 2, x0 + 3, f"id: {s['project']}", max(0, card_w - 4), detail_attr)
-            stdscr.addnstr(y + 3, x0 + 3, s["workspace"], max(0, card_w - 4), detail_attr)
+            marker_attr = curses.color_pair(4) | curses.A_BOLD if is_active else curses.A_NORMAL
+            marker = "➤ " if is_active else "  "
+            _safe_addnstr(stdscr, y + 1, x0 + 3, marker, 2, marker_attr)
+            status_text = "PROXY ACTIVE" if running else "PROXY INACTIVE"
+            status_x = max(x0 + 6, x0 + card_w - 1 - len(status_text))
+            id_max_w = max(0, status_x - (x0 + 5) - 1)  # clip the id *before* status, not under it
+            _safe_addnstr(stdscr, y + 1, x0 + 5, f"id: {s['project']}", id_max_w, detail_attr)
+            _safe_addnstr(stdscr, y + 1, status_x, status_text, max(0, card_w - 4), status_attr)
+            _safe_addnstr(stdscr, y + 2, x0 + 3, s["workspace"], max(0, card_w - 4), detail_attr)
 
     def _draw_domain_tab(self, stdscr, top, height, x0, w):
         rows = self.rows[TAB_DOMAINS]
-        stdscr.addnstr(top, x0 + 2, f"{'DOMAIN':<40} {'HITS':>6}  {'STATUS':<9} LAST SEEN", max(0, w - 2), curses.A_UNDERLINE)
+        _safe_addnstr(stdscr, top, x0 + 2, f"{'DOMAIN':<40} {'HITS':>6}  {'STATUS':<9} LAST SEEN", max(0, w - 2), curses.color_pair(3) | curses.A_UNDERLINE)
         if not rows:
-            stdscr.addnstr(top + 2, x0 + 2, "(no traffic logged yet)", max(0, w - 2))
+            _safe_addnstr(stdscr, top + 2, x0 + 2, "(no traffic logged yet)", max(0, w - 2))
             return
         now = time.time()
         start, visible = self._visible_window(TAB_DOMAINS, len(rows), height)
@@ -562,19 +649,21 @@ class OverviewApp:
             attr = curses.A_REVERSE if start + row_i == self.idx[TAB_DOMAINS] else (
                 curses.color_pair(1) if r["verdict"] == "ALLOWED" else curses.color_pair(2)
             )
-            stdscr.addnstr(y, x0 + 2, text, max(0, w - 2), attr)
+            _safe_addnstr(stdscr, y, x0 + 2, text, max(0, w - 2), attr)
 
     _WHITELIST_GROUP_LABEL = {
         "common": "── Common (00-common.txt — every environment) ──",
         "specific": "── Specific (per-environment whitelist.d/*.txt) ──",
-        "local": "── Local (local.txt — gitignored, this machine only) ──",
     }
 
     def _draw_whitelist_tab(self, stdscr, top, height, x0, w):
+        """Global Whitelist tab — the TRACKED whitelist.d files only (see
+        read_global_whitelist_entries); local.txt entries live in the separate Custom
+        Whitelist tab (_draw_custom_whitelist_tab) instead of a third group here."""
         rows = self.rows[TAB_WHITELIST]
-        stdscr.addnstr(top, x0 + 2, f"{'DOMAIN':<40} {'TYPE':<8} FILE", max(0, w - 2), curses.A_UNDERLINE)
+        _safe_addnstr(stdscr, top, x0 + 2, f"{'DOMAIN':<40} {'TYPE':<8} FILE", max(0, w - 2), curses.color_pair(3) | curses.A_UNDERLINE)
         if not rows:
-            stdscr.addnstr(top + 2, x0 + 2, "(whitelist.d has no entries)", max(0, w - 2))
+            _safe_addnstr(stdscr, top + 2, x0 + 2, "(no tracked whitelist.d entries)", max(0, w - 2))
             return
 
         # Build the actual display lines (group headers interspersed with rows) and scroll
@@ -606,18 +695,41 @@ class OverviewApp:
         for row_i, line in enumerate(lines[scroll : scroll + visible]):
             y = top + 1 + row_i
             if line[0] == "header":
-                stdscr.addnstr(y, x0 + 2, line[1], max(0, w - 2), curses.A_DIM)
+                _safe_addnstr(stdscr, y, x0 + 2, line[1], max(0, w - 2), curses.color_pair(3) | curses.A_DIM)
                 continue
             _, e, real_i = line
             kind = "wildcard" if e["wildcard"] else "exact"
             text = f"{e['domain']:<40} {kind:<8} {e['file']}"
-            attr = curses.A_REVERSE if real_i == self.idx[TAB_WHITELIST] else curses.A_NORMAL
-            stdscr.addnstr(y, x0 + 2, text, max(0, w - 2), attr)
+            if real_i == self.idx[TAB_WHITELIST]:
+                attr = curses.A_REVERSE
+            else:
+                attr = curses.color_pair(4) if e["wildcard"] else curses.A_NORMAL
+            _safe_addnstr(stdscr, y, x0 + 2, text, max(0, w - 2), attr)
+
+    def _draw_custom_whitelist_tab(self, stdscr, top, height, x0, w):
+        """Custom Whitelist tab — the gitignored local.txt only (see
+        read_custom_whitelist_entries). No group headers needed, unlike the Global Whitelist
+        tab, since there's only ever this one source file."""
+        rows = self.rows[TAB_CUSTOM]
+        _safe_addnstr(stdscr, top, x0 + 2, f"{'DOMAIN':<40} TYPE", max(0, w - 2), curses.color_pair(3) | curses.A_UNDERLINE)
+        if not rows:
+            _safe_addnstr(stdscr, top + 2, x0 + 2, "(local.txt is empty — 'n' to add a domain)", max(0, w - 2))
+            return
+        start, visible = self._visible_window(TAB_CUSTOM, len(rows), height)
+        for row_i, e in enumerate(rows[start : start + visible]):
+            y = top + 1 + row_i
+            kind = "wildcard" if e["wildcard"] else "exact"
+            text = f"{e['domain']:<40} {kind}"
+            if start + row_i == self.idx[TAB_CUSTOM]:
+                attr = curses.A_REVERSE
+            else:
+                attr = curses.color_pair(4) if e["wildcard"] else curses.A_NORMAL
+            _safe_addnstr(stdscr, y, x0 + 2, text, max(0, w - 2), attr)
 
     def _draw_log_tab(self, stdscr, top, height, x0, w):
         rows = self.rows[TAB_LOG]
         if not rows:
-            stdscr.addnstr(top, x0 + 2, "(no traffic logged yet)", max(0, w - 2))
+            _safe_addnstr(stdscr, top, x0 + 2, "(no traffic logged yet)", max(0, w - 2))
             return
         visible = height
         end = len(rows) - self.log_offset
@@ -628,9 +740,9 @@ class OverviewApp:
             denied = "DENIED" in r["code"]
             text = f"{ts}  {r['method']:<8} {r['host']:<35} {r['code']}"
             attr = curses.color_pair(2) if denied else curses.color_pair(1)
-            stdscr.addnstr(y, x0 + 2, text, max(0, w - 2), attr)
+            _safe_addnstr(stdscr, y, x0 + 2, text, max(0, w - 2), attr)
         if self.log_offset > 0:
-            stdscr.addnstr(top + visible, x0 + 2, f"-- scrolled back {self.log_offset} — ↓ to catch up --", max(0, w - 2), curses.A_DIM)
+            _safe_addnstr(stdscr, top + visible, x0 + 2, f"-- scrolled back {self.log_offset} — ↓ to catch up --", max(0, w - 2), curses.color_pair(3) | curses.A_DIM)
 
     # -- input ----------------------------------------------------------
     def handle_key(self, stdscr, key):
@@ -643,7 +755,7 @@ class OverviewApp:
             self._set_pane_pos(self._pane_pos() - 1)
         elif key == 9:  # Tab — quick jump straight between the two panes
             self._set_pane_pos(0 if self.focus == "proxy" else 1)
-        elif key in (ord("1"), ord("2"), ord("3")):
+        elif key in (ord("1"), ord("2"), ord("3"), ord("4")):
             self.focus = "proxy"
             self.proxy_tab = PROXY_TABS[key - ord("1")]
         elif key == curses.KEY_UP:
@@ -669,8 +781,12 @@ class OverviewApp:
         elif key in (ord("b"), ord("B")) and self.current_tab() == TAB_DOMAINS:
             self._block_selected_domain()
         elif key in (ord("b"), ord("B")) and self.current_tab() == TAB_WHITELIST:
-            self._remove_selected_whitelist_entry()
+            self._remove_selected_entry(TAB_WHITELIST)
         elif key in (ord("n"), ord("N")) and self.current_tab() == TAB_WHITELIST:
+            self._prompt_new_global_domain(stdscr)
+        elif key in (ord("b"), ord("B")) and self.current_tab() == TAB_CUSTOM:
+            self._remove_selected_entry(TAB_CUSTOM)
+        elif key in (ord("n"), ord("N")) and self.current_tab() == TAB_CUSTOM:
             self._prompt_new_domain(stdscr)
         elif key in (ord("c"), ord("C")) and self.current_tab() == TAB_LOG:
             self._clear_log()
@@ -681,7 +797,7 @@ class OverviewApp:
         if tab == TAB_STACKS:
             n = len(self.rows[TAB_STACKS]) + 1  # +1 for the trailing "+ New stack" row
             self.idx[TAB_STACKS] = max(0, min(n - 1, self.idx[TAB_STACKS] + delta))
-        elif tab in (TAB_DOMAINS, TAB_WHITELIST):
+        elif tab in (TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM):
             n = len(self.rows[tab])
             if n:
                 self.idx[tab] = max(0, min(n - 1, self.idx[tab] + delta))
@@ -794,32 +910,32 @@ class OverviewApp:
             else:
                 line = "│" + " " * (box_w - 2) + "│"
             try:
-                stdscr.addnstr(y0 + yy, x0, line, box_w)
+                _safe_addnstr(stdscr, y0 + yy, x0, line, box_w, curses.color_pair(3))
             except curses.error:
                 pass
 
         title = " New devcontainer stack "
-        stdscr.addnstr(y0, x0 + max(1, (box_w - len(title)) // 2), title, box_w - 2, curses.A_BOLD)
+        _safe_addnstr(stdscr, y0, x0 + max(1, (box_w - len(title)) // 2), title, box_w - 2, curses.color_pair(3) | curses.A_BOLD)
 
         list_top = y0 + 2
         for i, name in enumerate(names[:n_visible]):
             cursor = "→ " if i == idx else "  "
             if i == idx:
-                attr = curses.A_REVERSE if focus == "type" else curses.A_BOLD
+                attr = curses.A_REVERSE if focus == "type" else (curses.color_pair(4) | curses.A_BOLD)
             else:
                 attr = curses.A_NORMAL
-            stdscr.addnstr(list_top + i, x0 + 2, f"{cursor}{name}", inner_w, attr)
+            _safe_addnstr(stdscr, list_top + i, x0 + 2, f"{cursor}{name}", inner_w, attr)
 
         folder_row = list_top + n_visible + 1
         label = "Folder: "
-        stdscr.addnstr(folder_row, x0 + 2, label, inner_w)
+        _safe_addnstr(stdscr, folder_row, x0 + 2, label, inner_w)
         field_w = max(1, inner_w - len(label))
         field_attr = curses.A_UNDERLINE | (curses.A_REVERSE if focus == "folder" else 0)
-        stdscr.addnstr(folder_row, x0 + 2 + len(label), folder[-field_w:], field_w, field_attr)
+        _safe_addnstr(stdscr, folder_row, x0 + 2 + len(label), folder[-field_w:], field_w, field_attr)
 
         hint_row = min(folder_row + 2, y0 + box_h - 2)
         hint = "↑/↓ pick type · Tab switch field · Enter confirm · Esc cancel"
-        stdscr.addnstr(hint_row, x0 + 2, hint, inner_w, curses.A_DIM)
+        _safe_addnstr(stdscr, hint_row, x0 + 2, hint, inner_w, curses.color_pair(3) | curses.A_DIM)
 
         if focus == "folder":
             curses.curs_set(1)
@@ -860,20 +976,26 @@ class OverviewApp:
                     else:
                         line = "│" + " " * (box_w - 2) + "│"
                     try:
-                        stdscr.addnstr(y0 + yy, x0, line, box_w)
+                        _safe_addnstr(stdscr, y0 + yy, x0, line, box_w, curses.color_pair(3))
                     except curses.error:
                         pass
 
                 shown_title = f" {title} "
-                stdscr.addnstr(y0, x0 + max(1, (box_w - len(shown_title)) // 2), shown_title, box_w - 2, curses.A_BOLD)
+                _safe_addnstr(stdscr, y0, x0 + max(1, (box_w - len(shown_title)) // 2), shown_title, box_w - 2, curses.color_pair(3) | curses.A_BOLD)
 
                 max_offset = max(0, len(lines) - inner_h)
                 offset = max(0, min(offset, max_offset))
                 for i, ln in enumerate(lines[offset : offset + inner_h]):
-                    stdscr.addnstr(y0 + 2 + i, x0 + 2, ln, inner_w)
+                    if "FAILED" in ln:
+                        line_attr = curses.color_pair(2) | curses.A_BOLD
+                    elif ln.startswith("[ok]"):
+                        line_attr = curses.color_pair(1) | curses.A_BOLD
+                    else:
+                        line_attr = curses.A_NORMAL
+                    _safe_addnstr(stdscr, y0 + 2 + i, x0 + 2, ln, inner_w, line_attr)
 
                 hint = "↑/↓ scroll · Enter/Esc/q close" if len(lines) > inner_h else "Enter/Esc/q close"
-                stdscr.addnstr(y0 + box_h - 2, x0 + 2, hint, inner_w, curses.A_DIM)
+                _safe_addnstr(stdscr, y0 + box_h - 2, x0 + 2, hint, inner_w, curses.color_pair(3) | curses.A_DIM)
                 stdscr.refresh()
 
                 key = _read_key(stdscr)
@@ -933,8 +1055,8 @@ class OverviewApp:
 
         h, w = stdscr.getmaxyx()
         prompt = f"Delete stack '{s['env']}' (project {s['project']})? Removes containers, networks & volumes.  [y] confirm   [Esc] cancel"
-        stdscr.addnstr(h - 1, 0, " " * (w - 1), w - 1)
-        stdscr.addnstr(h - 1, 0, prompt[: w - 1], w - 1, curses.A_BOLD)
+        _safe_addnstr(stdscr, h - 1, 0, " " * (w - 1), w - 1)
+        _safe_addnstr(stdscr, h - 1, 0, prompt[: w - 1], w - 1, curses.color_pair(2) | curses.A_BOLD)
         stdscr.refresh()
         stdscr.timeout(-1)
         try:
@@ -992,12 +1114,17 @@ class OverviewApp:
         self.refresh()
         self.message = f"🚫 Blocked '{r['host']}'." if ok else f"⚠️  '{r['host']}' isn't a literal entry — covered by a wildcard."
 
-    # -- Whitelist tab --------------------------------------------------------
-    def _remove_selected_whitelist_entry(self):
-        rows = self.rows[TAB_WHITELIST]
-        if not rows or self.idx[TAB_WHITELIST] >= len(rows):
+    # -- Global/Custom Whitelist tabs ------------------------------------------
+    def _remove_selected_entry(self, tab):
+        """Shared by both whitelist tabs' 'b' — each tab's rows already only ever contain
+        entries from that tab's own file(s) (tracked files for TAB_WHITELIST, local.txt for
+        TAB_CUSTOM — see read_global_whitelist_entries/read_custom_whitelist_entries), so the
+        domain being removed is always scoped correctly by virtue of which tab it was
+        selected in."""
+        rows = self.rows[tab]
+        if not rows or self.idx[tab] >= len(rows):
             return
-        domain = rows[self.idx[TAB_WHITELIST]]["domain"]
+        domain = rows[self.idx[tab]]["domain"]
         with _quiet_stdout():
             do_block_domain(domain)
         self.refresh()
@@ -1010,11 +1137,12 @@ class OverviewApp:
         self.log_offset = 0
         self.message = "🧹 Cleared access.log." if ok else "⚠️  Failed to clear access.log."
 
-    def _prompt_new_domain(self, stdscr):
+    def _prompt_text(self, stdscr, prompt):
+        """Blocking single-line text prompt on the footer row — shared by _prompt_new_domain
+        and _prompt_new_global_domain. Returns the typed, stripped string, or "" on Esc/empty."""
         h, w = stdscr.getmaxyx()
-        prompt = "New domain (Enter to confirm, Esc to cancel): "
-        stdscr.addnstr(h - 1, 0, " " * (w - 1), w - 1)
-        stdscr.addnstr(h - 1, 0, prompt, w - 1)
+        _safe_addnstr(stdscr, h - 1, 0, " " * (w - 1), w - 1)
+        _safe_addnstr(stdscr, h - 1, 0, prompt, w - 1)
         stdscr.refresh()
 
         curses.curs_set(1)
@@ -1022,21 +1150,70 @@ class OverviewApp:
         stdscr.timeout(-1)  # block while typing — resumed by the caller's loop afterward
         try:
             raw = stdscr.getstr(h - 1, len(prompt), max(1, w - len(prompt) - 1))
-            domain = raw.decode(errors="replace").strip()
+            return raw.decode(errors="replace").strip()
         except Exception:
-            domain = ""
+            return ""
         finally:
             curses.noecho()
             curses.curs_set(0)
             stdscr.timeout(200)
 
+    def _prompt_new_domain(self, stdscr):
+        """Custom Whitelist tab's 'n' — always local.txt, no further prompt needed since
+        there's only one possible target file."""
+        domain = self._prompt_text(stdscr, "New domain for local.txt (Enter to confirm, Esc to cancel): ")
         if not domain:
             return
-
         with _quiet_stdout():
             do_allow_domain(domain)
         self.refresh()
         self.message = f"✅ Added '{domain}' to local.txt (not tracked by git)."
+
+    def _prompt_new_global_domain(self, stdscr):
+        """Global Whitelist tab's 'n' — deliberately edits a TRACKED whitelist file. Asks for
+        the domain, then whether it belongs in the shared 00-common.txt (every environment)
+        or this stack's own <env>-toolbelt.txt — picking wrong silently over- or under-shares
+        a domain, so this is a required step rather than a default."""
+        domain = self._prompt_text(stdscr, "New domain for the GLOBAL whitelist (Enter to confirm, Esc to cancel): ")
+        if not domain:
+            return
+
+        has_env = bool(self.env)
+        h, w = stdscr.getmaxyx()
+        prompt = f"Add '{domain}' to:  [c] 00-common.txt (every environment)"
+        if has_env:
+            prompt += f"   [s] {self.env}.txt (this one only)"
+        prompt += "   [Esc] cancel"
+        _safe_addnstr(stdscr, h - 1, 0, " " * (w - 1), w - 1)
+        _safe_addnstr(stdscr, h - 1, 0, prompt[: w - 1], w - 1, curses.color_pair(3) | curses.A_BOLD)
+        stdscr.refresh()
+
+        stdscr.timeout(-1)  # block for the choice — resumed by the caller's loop afterward
+        choice = None
+        try:
+            while True:
+                key = stdscr.getch()
+                if key in (ord("c"), ord("C")):
+                    choice = "__common__"
+                    break
+                if has_env and key in (ord("s"), ord("S")):
+                    choice = self.env
+                    break
+                if key == 27:  # bare Esc — no arrow-sequence follow-up expected here
+                    break
+        finally:
+            stdscr.timeout(200)
+
+        if choice is None:
+            self.message = "Cancelled."
+            return
+
+        target_env = None if choice == "__common__" else choice
+        with _quiet_stdout():
+            do_allow_domain_global(domain, target_env)
+        self.refresh()
+        dest = "00-common.txt" if target_env is None else f"{target_env}.txt"
+        self.message = f"✅ Added '{domain}' to {dest} (tracked — remember to commit it)."
 
 
 _ARROW_BY_FINAL_BYTE = {
@@ -1071,8 +1248,10 @@ def run_app(stdscr, cid, env, project, workspace, target_dir):
     try:
         curses.start_color()
         curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_GREEN, -1)
-        curses.init_pair(2, curses.COLOR_RED, -1)
+        curses.init_pair(1, curses.COLOR_GREEN, -1)   # good/running/allowed
+        curses.init_pair(2, curses.COLOR_RED, -1)      # bad/stopped/blocked/denied
+        curses.init_pair(3, curses.COLOR_CYAN, -1)     # structural chrome: titles, headers, tab bar, dividers
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)   # accents: markers, wildcards, call-to-action rows
     except curses.error:
         pass  # terminal without color support — fall back to no color, still usable
     stdscr.timeout(200)
@@ -1097,8 +1276,9 @@ def run_app(stdscr, cid, env, project, workspace, target_dir):
 def cmd_overview(target, follow, rebuild=False, debug=False):
     """The default `run.py` entry point (no subcommand). `dev`/`run.py` is invoked from all
     over the place, so `target` (the directory it was invoked from) only matters for: (a)
-    picking which existing stack is initially "active" for the Domains/Whitelist/Access log
-    tabs, if any exists for this exact directory, and (b) where a brand-new environment gets
+    picking which existing stack is initially "active" for the Domain Statistics/Global
+    Whitelist/Custom Whitelist/Access log tabs, if any exists for this exact directory, and
+    (b) where a brand-new environment gets
     created when the Stacks tab's 'n' action is used. It does NOT filter which existing
     stacks the Stacks tab lists — that's always every stack on the host, any directory."""
     project, env, workspace, cid = None, None, None, None

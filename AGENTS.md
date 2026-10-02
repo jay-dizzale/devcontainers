@@ -24,7 +24,7 @@ images and the scripts that build them.
 │   ├── __init__.py
 │   ├── cli.py                    # Top-level argument dispatch (port of the old run.sh loop)
 │   ├── launcher.py                # Default picker + stop/list/logs/build-base
-│   ├── proxy.py                  # The 4-tab curses app bare `run.py` opens by default
+│   ├── proxy.py                  # The two-pane curses app bare `run.py` opens by default
 │   ├── hostsetup.py              # `run.py setup` — one-time host setup (was setup.sh)
 │   └── docker_utils.py           # Shared `docker` CLI subprocess helpers, stack resolution
 ├── common/                       # Shared base for every environment
@@ -170,14 +170,18 @@ explicitly allowed, and every request (allowed or denied) is logged.
   `docker compose restart proxy` (there's no live-reload: the merge step runs once, in
   `entrypoint.sh`, not on `squid -k reconfigure`).
 - **`whitelist.d/local.txt` is gitignored** and is the *only* file `devtool/proxy.py`'s
-  `do_allow_domain` ever writes to — every "allow a domain" action (Domains tab `a`, Whitelist
-  tab `n`, the non-interactive snapshot's prompt) lands there, never in a tracked file. This is
-  deliberate: a personal/local domain was once added through this tool straight into
-  `00-common.txt` and got committed and pushed. A domain meant to be shared with the team still
-  goes into a tracked `whitelist.d/*.txt` file, but only by someone deliberately editing and
-  committing it by hand — not through the tool. The Whitelist tab shows it as its own "Local"
-  section (`OverviewApp._WHITELIST_GROUP_LABEL`), and `entrypoint.sh` picks it up automatically
-  like any other `whitelist.d/*.txt` file (no `entrypoint.sh` change needed for this).
+  `do_allow_domain` ever writes to — the Domain Statistics tab's quick `a` (allow) and the
+  Custom Whitelist tab's `n` both land there, never in a tracked file. This is deliberate: a
+  personal/local domain was once added through this tool straight into `00-common.txt` and got
+  committed and pushed. A domain meant to be shared with the team still goes into a tracked
+  `whitelist.d/*.txt` file via `do_allow_domain_global` (only the Global Whitelist tab's `n`
+  calls this — it asks `[c]` common vs. `[s]` this-environment first, same required step as
+  before), so sharing a domain is still possible through the tool, just a deliberate extra step
+  removed from the quick/local path rather than removed entirely. The Global Whitelist and
+  Custom Whitelist tabs are separate sub-tabs (`read_global_whitelist_entries`/
+  `read_custom_whitelist_entries` — see "Egress proxy and domain whitelist" above), not one
+  combined tab with a "Local" section. `entrypoint.sh` picks `local.txt` up automatically like
+  any other `whitelist.d/*.txt` file (no `entrypoint.sh` change needed for this).
 - **Logging**: Squid's `access_log` writes every allowed/denied request to a file in the
   `proxy-logs` named volume. `./run.py logs [-v /path] [-f]` tails it (from any directory,
   for the stack mounted from `-v`/cwd — prompts if more than one stack is running from there);
@@ -227,87 +231,120 @@ explicitly allowed, and every request (allowed or denied) is logged.
   launcher with a Python exception carved out for `proxy` — and finally the plain-text picker
   and the `proxy` subcommand were merged into this one app, so there is exactly one thing to
   invoke: bare `dev` (or `./run.py`).
-  The app is a 4-tab interactive `curses` app (falls back to a one-shot plain-text snapshot of
-  the Domains tab if stdin/stdout aren't both a tty, or a passive 2s-redraw loop with
-  `-f`/`--follow`, same spirit as `./run.py logs -f`): a separator line names the active
-  devcontainer environment, then a project/workspace/health line, then the tab bar, then the
-  active tab's body, then a keybinding footer.
-  - **Tab 1 — Stacks**: one row per devcontainer stack that already exists, host-wide
-    (`list_all_stacks`) — env, project, RUNNING/STOPPED, workspace path. **Not** scoped to the
-    directory `run.py` was invoked from: `dev` gets run from all over the host, so every stack
-    on every project shows up here regardless. `➤` marks the stack the other three tabs
-    currently operate on, `→` marks the cursor (the row `o`/`a`/`b`/Enter act on). `↑`/`↓`
-    selects a row, `o` builds/starts the selected row if needed and opens a shell in it
+  The app is a permanent two-pane interactive `curses` app (falls back to a one-shot
+  plain-text snapshot of the Domain Statistics tab if stdin/stdout aren't both a tty, or a
+  passive 2s-redraw loop with `-f`/`--follow`, same spirit as `./run.py logs -f`): a title bar
+  (`devcontainers`, credit top-right), then a pane-label row (`STACKS` left, `PROXY` right),
+  then the proxy pane's own sub-tab bar, then the two panes' bodies side by side separated by
+  a vertical divider, then a keybinding footer. `Tab`/`←`/`→` walk one step at a time along a
+  single line of 5 positions — Stacks(0), then the 4 proxy sub-tabs(1-4) — so going all the
+  way right and back left retraces the same path (`OverviewApp._pane_pos`/`_set_pane_pos`);
+  number keys `1`-`4` jump straight to a proxy sub-tab. Only one pane has input focus
+  (`self.focus`) at a time — `↑`/`↓` and the action keys below always act on whichever
+  pane/sub-tab is focused (`OverviewApp.current_tab()`).
+  - **Left pane — Stacks** (always visible, 1/3 width): one bordered card per devcontainer
+    stack that already exists, host-wide (`list_all_stacks`) — **not** scoped to the directory
+    `run.py` was invoked from: `dev` gets run from all over the host, so every stack on every
+    project shows up here regardless. Each card embeds its env type in the top border
+    (top-right), and its first content line has the `➤` active-stack marker + stack id on the
+    left and "PROXY ACTIVE"/"PROXY INACTIVE" (green/red) right-aligned, then the workspace
+    folder on its own line — no separate column header above the cards, since a single-column
+    header never matched a card layout. Selection highlights only the card's border (bold
+    yellow) rather than reversing the content too, which looked noisy. The list always has one
+    extra trailing "+ New stack" card past the real stacks, so starting a new one is just
+    another list item (`Enter` on it) as well as a dedicated key. `↑`/`↓` selects a card, `o`
+    builds/starts the selected one if needed and opens a shell in it
     (`launcher.start_and_open_shell`; `curses.wrapper` is exited first, since an interactive
     zsh session can't run inside curses' alternate screen, and the whole program ends once
-    that shell exits rather than returning to the TUI), `n` starts a **brand-new** environment
-    for the directory `run.py` was invoked from — the plain-text toolbelt picker that used to
-    be bare `run.py`'s whole job (`launcher.run_launcher`, same curses-teardown handoff as
-    `o`) — deliberately a separate action rather than synthetic "not started" rows mixed into
-    the list, since `dev` being invoked from an arbitrary directory makes "not started for
-    *this* directory" a different axis than "what's actually running somewhere," and mixing
-    them was more confusing than two keys. `Enter` makes an existing row the active stack
-    (switches `self.cid`/`env`/`project`/`workspace` and refreshes — view-only, doesn't open a
-    shell), `a` starts that row's proxy (`docker start`), `b` stops it (`docker stop` — blocks
-    that stack's `dev` egress until started again). This replaced the old standalone
-    `start`/`stop`/`status` subcommands and the plain-text environment picker: start/stop act
-    directly on any listed stack without first switching to it, health is always visible in
-    the header above the tabs, and launching a new environment is a dedicated key instead of a
-    separate program invocation.
-  - **Tab 2 — Domains**: one row per domain seen in `access.log` for the *active* stack (hit
-    count, live ALLOWED/BLOCKED, "Xs ago"). `↑`/`↓` selects a row, `a` whitelists it if BLOCKED,
-    `b` removes it from the whitelist if ALLOWED. STATUS is checked against the *live* merged
-    whitelist (exact match or a leading-dot wildcard as a suffix match), not the log's
-    last-recorded verdict — tested: using the log's own verdict means pressing `a`/`b` doesn't
-    visibly change a row until a fresh request re-proves it, which looks like the action
-    silently did nothing.
-  - **Tab 3 — Whitelist**: every domain actually configured across `whitelist.d/*.txt` (not
-    just ones seen in traffic), which file it came from, and exact-vs-wildcard — drawn as two
-    visually separated sections, "Common" (`00-common.txt`) then "Specific" (every
-    per-toolbelt file), domain-alphabetical within each (`read_whitelist_entries`'s `group`
-    field), rather than one flat list interleaving the two by domain name. The section header
-    lines aren't part of the selectable row list, so `↑`/`↓`/`b`/`n` all still index straight
-    into the real entries; they just cost the visible window 1-2 extra lines where a boundary
-    falls inside it. `b` removes the selected entry from **every** file that lists it exactly
-    (a domain can be covered by more
-    than one, e.g. a shared Apache mirror both `java-toolbelt.txt` and
-    `infrastructure-toolbelt.txt` list) — no-ops (clearly reported) if it's not literally listed
-    anywhere, e.g. only reachable via a broader wildcard, which has to be edited by hand. `n`
-    opens an inline prompt (`curses.echo()` + `getstr()`) to type a brand-new domain, then a
-    second prompt (`c`/`s`/Esc) asking whether it belongs in `00-common.txt` (every
-    environment) or the active stack's own `<env>-toolbelt.txt` — a required step, not a
-    default, since picking wrong silently over- or under-shares a domain. Tab 2's `a` asks the
-    same question.
-  - **Tab 4 — Access log**: the raw, timestamped `access.log` for the active stack, newest at
-    the bottom, auto-following until the user scrolls up (then it pauses, same convention as
-    `less +F`). `c` truncates `access.log` in place — this replaced the old standalone
-    `clear-log` subcommand.
-  - **Navigation**: `←`/`→` switches tabs, number keys `1`-`4` jump straight to a tab, `↑`/`↓`
-    moves the selection (or scrolls, on Tab 4) — the selected row's viewport auto-scrolls to
-    stay visible once the list is longer than the screen (tested: without this, moving the
-    selection past the first screenful left it off-screen with no visible feedback that
-    anything had moved). `q`/Ctrl-C quits from any tab.
+    that shell exits rather than returning to the TUI), `n` (or `Enter` on "+ New stack") opens
+    a centered modal (`_new_stack_modal`) to pick an environment type and a target folder
+    (default: the directory `run.py` was invoked from) — replaces the old plain-text
+    stderr/stdin toolbelt picker; `Esc` inside the modal cancels back to the Stacks pane
+    without doing anything. `Enter` on an existing card makes it the active stack (switches
+    `self.cid`/`env`/`project`/`workspace` and refreshes — view-only, doesn't open a shell),
+    `a` starts that stack's proxy (`docker start`), `b` stops it (`docker stop` — blocks that
+    stack's `dev` egress until started again), `d` tears the whole stack down (same as `dev
+    stop` — containers, networks, anonymous volumes; NOT the same as `b`) after a confirm
+    prompt, then shows the captured `docker compose down -v` output in a scrollable modal
+    (`_show_output_modal`) — the subprocess output is captured rather than streamed straight to
+    the terminal, because an uncaptured subprocess inherits curses' alternate-screen terminal
+    and corrupts the display (confirmed: this is exactly what happened before the output was
+    captured in `launcher._teardown_containers`).
+  - **Right pane — Proxy settings** (always visible, 2/3 width), its own sub-tab bar:
+    - **Domain Statistics**: one row per domain seen in `access.log` for the *active* stack
+      (hit count, live ALLOWED/BLOCKED, "Xs ago"). `↑`/`↓` selects a row, `a` allows it if
+      BLOCKED, `b` blocks it if ALLOWED. STATUS is checked against the *live* merged whitelist
+      (exact match or a leading-dot wildcard as a suffix match), not the log's last-recorded
+      verdict — tested: using the log's own verdict means pressing `a`/`b` doesn't visibly
+      change a row until a fresh request re-proves it, which looks like the action silently did
+      nothing. `a` here always writes to the gitignored `whitelist.d/local.txt`
+      (`do_allow_domain`), never a tracked file — see the Global/Custom Whitelist split below.
+    - **Global Whitelist**: every domain configured across the **tracked**
+      `whitelist.d/*.txt` files only (`00-common.txt` + per-env `*-toolbelt.txt`;
+      `read_global_whitelist_entries`) — not local.txt, which gets its own tab. Drawn as two
+      visually separated sections, "Common" then "Specific", domain-alphabetical within each
+      (the entry's `group` field) rather than one flat interleaved list. The section header
+      lines aren't part of the selectable row list, so `↑`/`↓`/`b`/`n` still index straight into
+      the real entries; they just cost the visible window 1-2 extra lines where a boundary
+      falls inside it. `b` removes the selected entry from **every** tracked file that lists it
+      exactly (a domain can be covered by more than one, e.g. a shared Apache mirror both
+      `java-toolbelt.txt` and `infrastructure-toolbelt.txt` list) — no-ops (clearly reported) if
+      it's not literally listed anywhere, e.g. only reachable via a broader wildcard, which has
+      to be edited by hand. `n` opens an inline prompt (`curses.echo()` + `getstr()`,
+      `_prompt_text`) for a new domain, then a second prompt (`c`/`s`/Esc) asking whether it
+      belongs in `00-common.txt` (every environment) or the active stack's own
+      `<env>-toolbelt.txt` (`do_allow_domain_global`) — a required step, not a default, since
+      picking wrong silently over- or under-shares a domain. This is the *only* path in the
+      whole app that writes to a tracked whitelist file, and it's deliberately one extra step
+      removed from the quick allow/block actions elsewhere (see the next bullet for why).
+    - **Custom Whitelist**: every domain in the gitignored `whitelist.d/local.txt` only
+      (`read_custom_whitelist_entries`) — no group headers needed, since there's only ever this
+      one source file. `n` adds straight to local.txt (`do_allow_domain`, no second prompt —
+      there's only one possible target), `b` removes the selected entry. This tab (and Domain
+      Statistics' `a`) exist specifically so a personal/local domain addition can never again
+      land in a tracked file by accident and get committed — that's exactly what happened once
+      (a personal domain landed in `00-common.txt` via this tool and got pushed), which is why
+      `do_allow_domain` always targets `local.txt` and only `do_allow_domain_global` (Global
+      Whitelist's `n`, see above) ever touches a tracked file.
+    - **Access log**: the raw, timestamped `access.log` for the active stack, newest at the
+      bottom, auto-following until the user scrolls up (then it pauses, same convention as
+      `less +F`). `c` truncates `access.log` in place.
+  - **Quitting**: `q`/Ctrl-C quits from any pane/sub-tab.
   - **Arrow keys**: `stdscr.timeout(200)` (needed so idle redraws happen every ~2s without
     blocking on `getch()`) breaks ncurses' own `ESC [ <letter>` disambiguation in this
     environment — confirmed via isolated repro, and `curses.set_escdelay()` does not fix it —
     so `devtool/proxy.py` reassembles those three bytes into
     `KEY_UP`/`KEY_DOWN`/`KEY_LEFT`/`KEY_RIGHT` itself (`_read_key`) rather than relying on
     `curses.keypad(True)` alone.
-  - **Curses + bare `print()` don't mix**: `do_allow_domain`/`do_block_domain`/
-    `restart_running_proxies` `print()` status lines meant for the plain-text fallback paths
-    (piped snapshot, `-f`). Called directly from inside the curses app those prints bypass
-    curses' own buffer and write straight to the real terminal underneath the alternate screen
-    — tested: this visibly corrupted the display after pressing `a`/`b`/`n` until the next full
-    redraw. Every curses call site wraps these calls in `_quiet_stdout()`
+  - **`addnstr` must be bounds-checked before every call, not just length-clamped**: ncurses
+    returns `ERR` (uncaught -> crash) when the *start* column/row of an `addnstr` is already at
+    or past the window's edge, even when the length argument (`n`) is separately clamped to 0
+    — confirmed by a real crash in a narrow terminal (the sub-tab bar's running `x` offset
+    walked past the right edge, and every title drawn after that point raised
+    `_curses.error: addnwstr() returned ERR`). `devtool/proxy.py`'s `_safe_addnstr(stdscr, y,
+    x, s, n, attr)` module-level helper checks `y`/`x` against `stdscr.getmaxyx()` first and
+    no-ops instead of raising; every `addnstr` call in the module goes through it.
+  - **Curses + bare `print()` don't mix**: `do_allow_domain`/`do_allow_domain_global`/
+    `do_block_domain`/`restart_running_proxies` `print()` status lines meant for the plain-text
+    fallback paths (piped snapshot, `-f`). Called directly from inside the curses app those
+    prints bypass curses' own buffer and write straight to the real terminal underneath the
+    alternate screen — tested: this visibly corrupted the display after pressing `a`/`b`/`n`
+    until the next full redraw. Every curses call site wraps these calls in `_quiet_stdout()`
     (`contextlib.redirect_stdout` to a throwaway `io.StringIO()`) and shows the same
     information via `self.message` instead.
-  Tabs 1-4 all funnel domain changes through `do_allow_domain`/`do_block_domain`, which restart
-  **every currently-running** proxy container (not just the active stack's) so a whitelist
-  change applies immediately, since they all load the same shared `whitelist.d/` directory.
-  That restart scan matches on the `proxy` service name (it carries no `devcontainer.env` label
-  of its own — only `dev` does) further narrowed to containers whose compose config-files label
-  actually includes `common/proxy.docker-compose.yml`, so it can never touch an unrelated
-  project's own `proxy` service.
+  - **Colors**: four `curses` color pairs (`run_app`) — green/red for status/verdict
+    (RUNNING/ALLOWED vs. STOPPED/BLOCKED/DENIED), cyan for structural chrome (titles, pane
+    labels, tab bar, dividers, column headers), yellow for accents (the `➤` marker, "+ New
+    stack", wildcard entries, the selected Stacks card's border). Falls back to no color on a
+    terminal without color support (`curses.error` around the `init_pair` calls).
+  Every tab/sub-tab that can allow/block a domain funnels through `do_allow_domain`/
+  `do_allow_domain_global`/`do_block_domain`, which restart **every currently-running** proxy
+  container (not just the active stack's) so a whitelist change applies immediately, since
+  they all load the same shared `whitelist.d/` directory. That restart scan matches on the
+  `proxy` service name (it carries no `devcontainer.env` label of its own — only `dev` does)
+  further narrowed to containers whose compose config-files label actually includes
+  `common/proxy.docker-compose.yml`, so it can never touch an unrelated project's own `proxy`
+  service.
 - **`setup`'s own leading `-v` must be extracted *before* checking whether the next token is
   `setup`.** The `dev()` shell function `run.py setup` installs always runs
   `run.py -v "$(pwd)" "$@"` — a leading `-v <path>` ahead of whatever was actually typed.
@@ -325,15 +362,17 @@ explicitly allowed, and every request (allowed or denied) is logged.
 # One-time host setup (git identity, CA bundle, proxy.env, `dev` shell function)
 ./run.py setup
 
-# The entire tool — no subcommand. 4 tabs: Stacks (every existing stack
-# host-wide — 'o' opens a shell in the selected one, building/starting it
-# first if needed; 'n' starts a brand-new environment for this directory),
-# Domains (allow/block), Whitelist (list/add/remove), Access log (view/clear)
+# The entire tool — no subcommand. Two-pane TUI: Stacks (left, always visible —
+# 'o' opens a shell in the selected one, building/starting it first if needed;
+# 'n'/Enter on "+ New stack" starts a brand-new one via a modal; 'd' tears a
+# stack down) and Proxy settings (right — Domain Statistics allow/block,
+# Global Whitelist list/add/remove tracked files, Custom Whitelist list/add/
+# remove the gitignored local.txt, Access log view/clear)
 ./run.py
 ./run.py -v /path/to/your/project    # mount a different directory into /workspace
 ./run.py -r                          # force a from-scratch rebuild when you 'o'/'n' an environment
 ./run.py --debug                     # verbose docker build output (--progress=plain)
-./run.py -f                          # passive — redraws the Domains table every 2s, no input
+./run.py -f                          # passive — redraws the Domain Statistics table every 2s, no input
 
 # Build only the shared base image (toolbelt-base:latest), then exit
 ./run.py build-base [-r]

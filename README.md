@@ -61,14 +61,17 @@ or denied) is logged. This is enforced by iptables rules set inside the containe
 startup (dropping all outbound traffic except to the proxy), not just by setting `HTTP_PROXY`
 — a process that ignores those env vars still can't reach the internet directly.
 
-- **Something you need got blocked?** `./run.py` (or just `dev`) — the same 4-tab terminal app
-  described below: **Stacks** (every devcontainer stack, start/stop any one's proxy, switch
-  which stack the other tabs manage), **Domains** (every domain seen, green for allowed, red
-  for denied, `a`/`b` to allow/block the selected one), **Whitelist** (every configured domain,
-  `n` to add a new one — you'll be asked whether it belongs in the shared list or just this
-  environment's — `b` to remove one), and **Access log** (the raw, timestamped log, `c` to
-  clear it). Add `-f` for a passive, non-interactive view instead (redraws every 2s until
-  Ctrl-C).
+- **Something you need got blocked?** `./run.py` (or just `dev`) — the same terminal app
+  described below: **Stacks** (left pane, always visible — every devcontainer stack as its own
+  card, start/stop/delete any one, switch which stack the other panes manage, or start a brand
+  new one) and, on the right, **Domain Statistics** (every domain seen, green for allowed, red
+  for denied, `a`/`b` to allow/block the selected one — `a` here always adds to your personal,
+  gitignored `local.txt`), **Global Whitelist** (every domain in the *shared, committed*
+  whitelist files, `n` to add one — you'll be asked whether it belongs in the shared list or
+  just this environment's — `b` to remove one), **Custom Whitelist** (your own personal,
+  gitignored additions — same `n`/`b`, no sharing prompt needed), and **Access log** (the raw,
+  timestamped log, `c` to clear it). Add `-f` for a passive, non-interactive view instead
+  (redraws every 2s until Ctrl-C).
 - **Filtering is domain-level, not a man-in-the-middle** — Squid reads the domain from the
   `CONNECT` request for HTTPS (or the request host for plain HTTP) and either tunnels the
   connection untouched or denies it. It never decrypts traffic, so no certificate needs to be
