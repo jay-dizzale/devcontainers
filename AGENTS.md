@@ -255,8 +255,9 @@ explicitly allowed, and every request (allowed or denied) is logged.
     another list item (`Enter` on it) as well as a dedicated key. `↑`/`↓` selects a card, `o`
     builds/starts the selected one if needed and opens a shell in it
     (`launcher.start_and_open_shell`; `curses.wrapper` is exited first, since an interactive
-    zsh session can't run inside curses' alternate screen, and the whole program ends once
-    that shell exits rather than returning to the TUI), `n` (or `Enter` on "+ New stack") opens
+    zsh session can't run inside curses' alternate screen — `cmd_overview` then re-enters
+    `curses.wrapper` once that shell exits, returning to the Stacks pane instead of ending the
+    program), `n` (or `Enter` on "+ New stack") opens
     a centered modal (`_new_stack_modal`) to pick an environment type and a target folder
     (default: the directory `run.py` was invoked from) — replaces the old plain-text
     stderr/stdin toolbelt picker; `Esc` inside the modal cancels back to the Stacks pane

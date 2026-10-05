@@ -1306,8 +1306,13 @@ def cmd_overview(target, follow, rebuild=False, debug=False):
         run_snapshot(cid, env, project, workspace)
         return
 
-    pending = curses.wrapper(run_app, cid, env, project, workspace, target)
-    if pending:
+    # Loops back into the TUI after a shell exits instead of ending the program — 'o'/'n' only
+    # tear curses down because a real interactive zsh session can't run inside its alternate
+    # screen (see start_and_open_shell), not because the whole app should quit.
+    while True:
+        pending = curses.wrapper(run_app, cid, env, project, workspace, target)
+        if not pending:
+            break
         action, row = pending
         if action == "open_shell":
             compose_dir = REPO_ROOT / row["env"]
