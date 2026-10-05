@@ -14,11 +14,20 @@ WHITELIST_FILE=/etc/squid/whitelist.txt
 # domain (e.g. the Apache mirrors java-toolbelt.txt and
 # infrastructure-toolbelt.txt both need) — Squid only warns about ACL
 # duplicates, but deduping here keeps that log clean.
+#
+# `|| true` on the grep: under `set -e`, a command that fails on the
+# producer side of a pipe (this for-loop feeds `sort -u`) still aborts the
+# loop immediately, even though the pipeline's own exit status only reflects
+# the last stage — grep exits 1 on a file with no whitelist-able lines (a
+# comment-only placeholder, e.g. latex-toolbelt.txt/pico-toolbelt.txt), which
+# silently killed the loop before every alphabetically-later file (confirmed:
+# local.txt, pico-toolbelt.txt, web-toolbelt.txt all went unmerged as a
+# result) with no error printed at all.
 : > "$WHITELIST_FILE"
 if [ -d "$WHITELIST_DIR" ]; then
     for f in "$WHITELIST_DIR"/*.txt; do
         [ -e "$f" ] || continue
-        grep -Ev '^[[:space:]]*(#|$)' "$f"
+        grep -Ev '^[[:space:]]*(#|$)' "$f" || true
     done | sort -u > "$WHITELIST_FILE"
 fi
 
