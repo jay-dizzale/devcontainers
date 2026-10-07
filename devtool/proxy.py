@@ -1,6 +1,6 @@
 """devtool/proxy.py — the two-pane curses app that bare `run.py` launches: Stacks on the left
-(1/3 width — every devcontainer stack on the host, not just the current directory's),
-proxy settings on the right (2/3 width — Domain Statistics/Global Whitelist/Custom
+(2/5 width — every devcontainer stack on the host, not just the current directory's),
+proxy settings on the right (3/5 width — Domain Statistics/Global Whitelist/Custom
 Whitelist/Access log sub-tabs). 'o'/'n' tear the TUI down first, since a
 real interactive zsh session can't run inside curses' alternate screen; the program ends
 when that shell exits.
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from . import launcher
 from .docker_utils import (
-    CONFIG_FILES, ENV, ID, PROJECT, REPO_ROOT, STATE, WORKDIR, WORKSPACE,
+    CONFIG_FILES, ENV, ID, PORTS, PROJECT, REPO_ROOT, STATE, WORKDIR, WORKSPACE,
     die, docker, docker_engine_version, docker_out, proxy_cid_for_project, ps_rows, resolve_stack,
 )
 
@@ -47,9 +47,9 @@ def list_all_stacks():
     OverviewApp._new_stack), not a row here — this only ever lists what already exists."""
     # Two bulk `docker ps --format` calls total, however many stacks exist.
     seen = {}
-    for project, env, workspace, state in ps_rows("label=devcontainer.env", fields=[PROJECT, ENV, WORKSPACE, STATE]):
+    for project, env, workspace, state, ports in ps_rows("label=devcontainer.env", fields=[PROJECT, ENV, WORKSPACE, STATE, PORTS]):
         if project:
-            seen[project] = (env, workspace, state)
+            seen[project] = (env, workspace, state, ports)
 
     proxy_by_project = {
         project: (cid, state == "running")
@@ -58,7 +58,7 @@ def list_all_stacks():
     }
 
     stacks = []
-    for project, (env, workspace, state) in sorted(seen.items()):
+    for project, (env, workspace, state, ports) in sorted(seen.items()):
         proxy_cid, running = proxy_by_project.get(project, (None, False))
         stacks.append({
             "project": project,
@@ -69,9 +69,40 @@ def list_all_stacks():
             # The stack's own `dev` container: docker's state word
             # (running/exited/created/paused/restarting) — the card's border color and label.
             "container_state": state or "unknown",
+            "ports": _published_ports(ports),
         })
 
     return stacks
+
+
+def _published_ports(ports):
+    """`docker ps`'s Ports column ("127.0.0.1:3010->3000/tcp, [::]:3010->3000/tcp, 9229/tcp")
+    -> one dict per PUBLISHED mapping (an exposed-but-unpublished entry like "9229/tcp" has no
+    "->" and is skipped): {"bind", "host_port", "container_port"}. The bind address is kept
+    rather than discarded — it's exactly what decides whether a port is reachable from outside
+    the host (127.0.0.1 only vs 0.0.0.0/:: "all interfaces") — and IPv4/IPv6 are both kept as
+    separate rows rather than deduplicated, since they can genuinely differ in reachability.
+    Docker only reports these while the container runs — the env compose files publish
+    host-port *ranges*, so the actual port is picked at start and differs per stack."""
+    out = []
+    for entry in ports.split(","):
+        entry = entry.strip()
+        if "->" not in entry:
+            continue  # exposed but not published
+        hostside, container = entry.split("->", 1)
+        bind, _, host_port = hostside.rpartition(":")  # rpartition: "[::]:3010" -> ("[::]", ":", "3010")
+        out.append({"bind": bind or "0.0.0.0", "host_port": host_port, "container_port": container.split("/", 1)[0]})
+    return out
+
+
+def _format_bind(bind):
+    """Docker's bind address, annotated with what it actually means for reachability —
+    127.0.0.1/::1 only answer on the host itself, 0.0.0.0/:: answer on every interface."""
+    if bind in ("127.0.0.1", "::1", "[::1]"):
+        return f"{bind} (localhost)"
+    if bind in ("0.0.0.0", "::", "[::]"):
+        return f"{bind} (all interfaces)"
+    return bind
 
 
 def restart_running_proxies():
@@ -307,16 +338,19 @@ def run_follow(cid, env, project, workspace):
         print("\n👋 Stopped watching.")
 
 
-TAB_STACKS, TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG = range(5)
+TAB_STACKS, TAB_DOMAINS, TAB_PORTS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG = range(6)
 
 # The right-hand "proxy settings" pane keeps its own small sub-tab bar — Stacks is the
-# permanent left pane (see OverviewApp.draw), not one of these. TAB_WHITELIST ("Global
+# permanent left pane (see OverviewApp.draw), not one of these. TAB_PORTS is a read-only
+# per-port table (host port / container port / bind address) for whichever single stack is
+# currently selected in the Stacks pane — the Stacks cards themselves don't show ports at
+# all any more, only this tab does (see _draw_ports_tab). TAB_WHITELIST ("Global
 # Whitelist") shows/edits only the TRACKED whitelist.d files (00-common.txt + per-env
 # *-toolbelt.txt); TAB_CUSTOM ("Custom Whitelist") shows/edits only the gitignored local.txt
 # — see read_global_whitelist_entries/read_custom_whitelist_entries and
 # do_allow_domain/do_allow_domain_global.
-PROXY_TABS = [TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG]
-PROXY_TAB_TITLES = [" 1:Domain Stats ", " 2:Global WL ", " 3:Custom WL ", " 4:Access log "]
+PROXY_TABS = [TAB_DOMAINS, TAB_PORTS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG]
+PROXY_TAB_TITLES = [" 1:Domain Stats ", " 2:Ports ", " 3:Global WL ", " 4:Custom WL ", " 5:Access log "]
 
 
 @contextlib.contextmanager
@@ -367,9 +401,9 @@ def _draw_box(stdscr, y0, x0, box_h, box_w, title):
 
 class OverviewApp:
     """The interactive curses app bare `run.py` opens: a permanent two-pane split — Stacks
-    always visible on the left 1/3, the proxy settings (Domain Statistics/Global Whitelist/
-    Custom Whitelist/Access log, switchable via their own sub-tab bar) on the right 2/3.
-    Exactly one pane has input focus at a time (self.focus); Tab/←/→ moves focus."""
+    always visible on the left 2/5, the proxy settings (Domain Statistics/Ports/Global
+    Whitelist/Custom Whitelist/Access log, switchable via their own sub-tab bar) on the
+    right 3/5. Exactly one pane has input focus at a time (self.focus); Tab/←/→ moves focus."""
 
     def __init__(self, cid, env, project, workspace, target_dir):
         self.cid = cid
@@ -379,10 +413,10 @@ class OverviewApp:
         self.target_dir = target_dir  # fixed: where 'n' (new stack) builds/starts into
         self.focus = "stacks"         # "stacks" (left pane) or "proxy" (right pane)
         self.proxy_tab = TAB_DOMAINS  # which sub-tab the right pane currently shows
-        self.idx = [0, 0, 0, 0, 0]    # selected row, per tab (log tab unused — it scrolls)
-        self.scroll = [0, 0, 0, 0]    # stacks/domains/whitelist/custom: first visible row (viewport top)
+        self.idx = [0, 0, 0, 0, 0, 0]  # selected row, per tab (log tab unused — it scrolls)
+        self.scroll = [0, 0, 0, 0, 0]  # stacks/domains/ports/whitelist/custom: first visible row (viewport top)
         self.log_offset = 0           # log tab: 0 = pinned to newest ("following")
-        self.rows = [[], [], [], [], []]
+        self.rows = [[], [], [], [], [], []]
         self.message = ""
         self.last_refresh = 0.0
         self.pending_action = None    # set by 'o' (open shell) — breaks the main loop to act on
@@ -395,10 +429,10 @@ class OverviewApp:
         return TAB_STACKS if self.focus == "stacks" else self.proxy_tab
 
     def _pane_pos(self):
-        """Linear position along Stacks(0) → Domain Stats(1) → Global WL(2) → Custom WL(3) →
-        Access log(4), so ←/→ can walk through all five one step at a time — all the way
-        right into the last sub-tab, then back out to Stacks by going left — instead of only
-        toggling between the two panes."""
+        """Linear position along Stacks(0) → Domain Stats(1) → Ports(2) → Global WL(3) →
+        Custom WL(4) → Access log(5), so ←/→ can walk through all six one step at a time —
+        all the way right into the last sub-tab, then back out to Stacks by going left —
+        instead of only toggling between the two panes."""
         if self.focus == "stacks":
             return 0
         return 1 + PROXY_TABS.index(self.proxy_tab)
@@ -420,6 +454,8 @@ class OverviewApp:
         self.rows[TAB_WHITELIST] = read_global_whitelist_entries()
         self.rows[TAB_CUSTOM] = read_custom_whitelist_entries()
         self.last_refresh = time.time()
+        # TAB_PORTS has no rows of its own — it just reads whichever stack is selected in
+        # TAB_STACKS (see _draw_ports_tab), so there's nothing to clamp here.
         for i in (TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM):
             if self.rows[i]:
                 self.idx[i] = min(self.idx[i], len(self.rows[i]) - 1)
@@ -453,7 +489,7 @@ class OverviewApp:
         if len(credit) < w:
             _safe_addnstr(stdscr, 0, w - len(credit), credit, len(credit), curses.color_pair(4) | curses.A_DIM)
 
-        left_w = max(18, w // 3)
+        left_w = max(18, w * 2 // 5)
         divider_x = min(left_w, w - 1)
         right_x = divider_x + 1
         right_w = max(5, w - right_x)
@@ -483,6 +519,8 @@ class OverviewApp:
 
         if self.proxy_tab == TAB_DOMAINS:
             self._draw_domain_tab(stdscr, body_top, body_h, right_x, right_w)
+        elif self.proxy_tab == TAB_PORTS:
+            self._draw_ports_tab(stdscr, body_top, body_h, right_x, right_w)
         elif self.proxy_tab == TAB_WHITELIST:
             self._draw_whitelist_tab(stdscr, body_top, body_h, right_x, right_w)
         elif self.proxy_tab == TAB_CUSTOM:
@@ -499,9 +537,11 @@ class OverviewApp:
         tab = self.current_tab()
         if tab == TAB_STACKS:
             return f"↑/↓ select · o open shell · n new stack · Enter switch/new · s start/stop stack · a start proxy · b stop proxy · d delete stack · {common}"
-        sub = "1/2/3/4 sub-tab · "
+        sub = "1/2/3/4/5 sub-tab · "
         if tab == TAB_DOMAINS:
             return f"↑/↓ select · a allow (→ local.txt) · b block · {sub}{common}"
+        if tab == TAB_PORTS:
+            return f"shows the stack selected in Stacks · {sub}{common}"
         if tab == TAB_WHITELIST:
             return f"↑/↓ select · n new (common/env, tracked) · b remove · {sub}{common}"
         if tab == TAB_CUSTOM:
@@ -533,8 +573,9 @@ class OverviewApp:
         self.scroll[tab] = scroll
         return scroll, visible
 
-    # bordered card: top border, ID title (+ proxy state), id, FOLDER title, value, bottom border
-    _STACK_ENTRY_LINES = 6
+    # bordered card: top border, "ID: <id>" (+ proxy state), FOLDER title, value, bottom
+    # border — ports have their own dedicated Ports tab (see _draw_ports_tab) instead.
+    _STACK_ENTRY_LINES = 5
 
     # Light box-drawing for normal cards, heavy for the selected one — selection can't be a
     # border color any more, since the color now carries the container's state (green/red).
@@ -559,9 +600,12 @@ class OverviewApp:
         so starting a new one is just another list item (Enter on it) rather than only a
         separate key ('n' still works too, from anywhere in this pane). Each stack is its own
         bordered card: its env type sits in the top border (top-right, see
-        _card_top_border), its first content line has the ➤ active-stack marker and the
-        stack id together on the left and the proxy's live state ("PROXY ACTIVE"/"PROXY
-        INACTIVE", colored) right-aligned, then the workspace folder on its own line. No
+        _card_top_border), its first content line has the ➤ active-stack marker and
+        "ID: <id>" together on the left and the proxy's live state ("PROXY ACTIVE"/"PROXY
+        INACTIVE", colored) right-aligned, then a FOLDER title line with its value on the
+        line below (long workspace paths need the full line's width, so FOLDER doesn't
+        share a line like ID does). Published ports aren't shown here at all — see the
+        dedicated Ports tab (_draw_ports_tab) instead. No
         plain column header above the cards — a single-column header never matched a card
         layout. The border's color is the stack's own container state — green when it's
         running, red otherwise — and that state is also spelled out top-left in the border
@@ -610,25 +654,29 @@ class OverviewApp:
             s = rows[row_i]
             is_active = s["project"] and s["project"] == self.project
             running = s["status"] == "RUNNING"
-            # Labeled fields: a title line (cyan, bold) with its value on the line below (bold,
-            # not dimmed) — ID, then FOLDER. Content attrs never change
-            # with selection — only the border (above) does, so the highlight reads as "this
-            # card" rather than painting the text too.
+            # "ID: <id>" shares one line (title+value combined); FOLDER keeps its title and
+            # value on two separate lines, since a workspace path needs the full line's
+            # width. Content attrs never change with selection — only the border (above)
+            # does, so the highlight reads as "this card" rather than painting the text too.
             title_attr = curses.color_pair(3) | curses.A_BOLD
             value_attr = curses.A_BOLD
             status_attr = curses.color_pair(1) if running else curses.color_pair(2)
             marker_attr = curses.color_pair(4) | curses.A_BOLD if is_active else curses.A_NORMAL
-            inner_w = max(0, card_w - 6)  # value column: x0+5 .. inside the right border
+            label_x = x0 + 5
+            inner_w = max(0, card_w - 6)  # label_x .. inside the right border
 
             _safe_addnstr(stdscr, y + 1, x0 + 3, "➤ " if is_active else "  ", 2, marker_attr)
-            _safe_addnstr(stdscr, y + 1, x0 + 5, "ID", inner_w, title_attr)
+            id_label = "ID: "
+            _safe_addnstr(stdscr, y + 1, label_x, id_label, inner_w, title_attr)
+            id_val_x = label_x + len(id_label)
+            id_val_w = max(0, inner_w - len(id_label))
+            _safe_addnstr(stdscr, y + 1, id_val_x, s["project"], id_val_w, value_attr)
             status_text = "PROXY ACTIVE" if running else "PROXY INACTIVE"
-            status_x = max(x0 + 8, x0 + card_w - 1 - len(status_text))
+            status_x = max(id_val_x + 1, x0 + card_w - 1 - len(status_text))
             _safe_addnstr(stdscr, y + 1, status_x, status_text, max(0, x0 + card_w - status_x), status_attr)
-            _safe_addnstr(stdscr, y + 2, x0 + 5, s["project"], inner_w, value_attr)
 
-            _safe_addnstr(stdscr, y + 3, x0 + 5, "FOLDER", inner_w, title_attr)
-            _safe_addnstr(stdscr, y + 4, x0 + 5, self._tail(s["workspace"], inner_w), inner_w, value_attr)
+            _safe_addnstr(stdscr, y + 2, label_x, "FOLDER", inner_w, title_attr)
+            _safe_addnstr(stdscr, y + 3, label_x, self._tail(s["workspace"], inner_w), inner_w, value_attr)
 
     @staticmethod
     def _tail(text, width):
@@ -654,6 +702,36 @@ class OverviewApp:
                 curses.color_pair(1) if r["verdict"] == "ALLOWED" else curses.color_pair(2)
             )
             _safe_addnstr(stdscr, y, x0 + 2, text, max(0, w - 2), attr)
+
+    def _draw_ports_tab(self, stdscr, top, height, x0, w):
+        """Ports for only the stack currently selected in the Stacks pane (self.idx[TAB_STACKS]
+        — the ➤-highlighted card, read regardless of which pane has focus), one row per
+        published mapping rather than one row per stack: docker can publish the same
+        container port on more than one bind address (e.g. once on 0.0.0.0, once on ::), and
+        collapsing those would hide exactly the distinction this tab exists to show — whether
+        a port only answers on the host itself (127.0.0.1/::1) or on every interface
+        (0.0.0.0/::), via _format_bind."""
+        s = self._selected(TAB_STACKS)
+        if s is None:
+            _safe_addnstr(stdscr, top, x0 + 2, "(select a stack in the Stacks pane)", max(0, w - 2))
+            return
+        header = f"{s['project']}  ·  {s['env']}  ·  {s['container_state'].upper()}"
+        _safe_addnstr(stdscr, top, x0 + 2, header, max(0, w - 2), curses.color_pair(3) | curses.A_BOLD)
+        _safe_addnstr(stdscr, top + 2, x0 + 2, f"{'HOST PORT':<11} {'CONTAINER PORT':<16} BIND ADDRESS", max(0, w - 2), curses.color_pair(3) | curses.A_UNDERLINE)
+
+        ports = s["ports"]
+        if not ports:
+            reason = "stack isn't running" if s["container_state"] != "running" else "no ports published"
+            _safe_addnstr(stdscr, top + 4, x0 + 2, f"(none — {reason})", max(0, w - 2), curses.A_DIM)
+            return
+
+        visible = max(0, height - 4)
+        for row_i, p in enumerate(ports[:visible]):
+            y = top + 3 + row_i
+            text = f"{p['host_port']:<11} {p['container_port']:<16} {_format_bind(p['bind'])}"
+            _safe_addnstr(stdscr, y, x0 + 2, text, max(0, w - 2), curses.A_BOLD)
+        if len(ports) > visible:
+            _safe_addnstr(stdscr, top + 3 + visible, x0 + 2, f"… {len(ports) - visible} more", max(0, w - 2), curses.color_pair(3) | curses.A_DIM)
 
     _WHITELIST_GROUP_LABEL = {
         "common": "── Common (00-common.txt — every environment) ──",
@@ -755,6 +833,7 @@ class OverviewApp:
                 "d": lambda: self._delete_selected_stack(stdscr),
             },
             TAB_DOMAINS: {"a": self._allow_selected, "b": self._block_selected_domain},
+            TAB_PORTS: {},
             TAB_WHITELIST: {"b": lambda: self._remove_selected_entry(TAB_WHITELIST), "n": lambda: self._prompt_new_global_domain(stdscr)},
             TAB_CUSTOM: {"b": lambda: self._remove_selected_entry(TAB_CUSTOM), "n": lambda: self._prompt_new_domain(stdscr)},
             TAB_LOG: {"c": self._clear_log},
@@ -771,7 +850,7 @@ class OverviewApp:
             self._set_pane_pos(self._pane_pos() - 1)
         elif key == 9:  # Tab — quick jump straight between the two panes
             self._set_pane_pos(0 if self.focus == "proxy" else 1)
-        elif ord("1") <= key <= ord("4"):
+        elif ord("1") <= key <= ord("5"):
             self.focus = "proxy"
             self.proxy_tab = PROXY_TABS[key - ord("1")]
         elif key in (curses.KEY_UP, curses.KEY_DOWN):
@@ -795,6 +874,8 @@ class OverviewApp:
             n = len(self.rows[tab])
             if n:
                 self.idx[tab] = max(0, min(n - 1, self.idx[tab] + delta))
+        elif tab == TAB_PORTS:
+            pass  # read-only view of whichever stack TAB_STACKS has selected — nothing to move
         else:
             n = len(self.rows[TAB_LOG])
             self.log_offset = max(0, min(max(0, n - 1), self.log_offset - delta))

@@ -240,24 +240,26 @@ explicitly allowed, and every request (allowed or denied) is logged.
   centered; credit top-right), then a pane-label row (`STACKS` left, `PROXY` right),
   then the proxy pane's own sub-tab bar, then the two panes' bodies side by side separated by
   a vertical divider, then a keybinding footer. `Tab`/`←`/`→` walk one step at a time along a
-  single line of 5 positions — Stacks(0), then the 4 proxy sub-tabs(1-4) — so going all the
+  single line of 6 positions — Stacks(0), then the 5 proxy sub-tabs(1-5) — so going all the
   way right and back left retraces the same path (`OverviewApp._pane_pos`/`_set_pane_pos`);
-  number keys `1`-`4` jump straight to a proxy sub-tab. Only one pane has input focus
+  number keys `1`-`5` jump straight to a proxy sub-tab. Only one pane has input focus
   (`self.focus`) at a time — `↑`/`↓` and the action keys below always act on whichever
   pane/sub-tab is focused (`OverviewApp.current_tab()`).
-  - **Left pane — Stacks** (always visible, 1/3 width): one bordered card per devcontainer
+  - **Left pane — Stacks** (always visible, 2/5 width): one bordered card per devcontainer
     stack that already exists, host-wide (`list_all_stacks`) — **not** scoped to the directory
     `run.py` was invoked from: `dev` gets run from all over the host, so every stack on every
     project shows up here regardless. Each card embeds its env type in the top border
     (top-right) and the stack's own container state top-left (" RUNNING "/" EXITED " — the
     `dev` container, from `docker ps`'s `.State`, not the proxy's); the whole border
-    is green when that container is running, red otherwise. Inside, labeled fields — a
-    cyan bold title line with its value (bold, not dimmed) on the line below: `ID` (with the
-    `➤` active-stack marker to its left and "PROXY ACTIVE"/"PROXY INACTIVE" (green/red)
-    right-aligned on the title line), then `FOLDER` (clipped from the left, `…/end/of/path`,
-    since the end is what tells stacks apart) — no separate column
-    header above the cards, since a single-column header never
-    matched a card layout. Selection is shown by shape, not color (color is the container
+    is green when that container is running, red otherwise. Inside, labeled fields: `ID` has
+    its label and value combined on one line (with the `➤` active-stack marker to its left and
+    "PROXY ACTIVE"/"PROXY INACTIVE" (green/red) right-aligned on that same line), then `FOLDER`
+    keeps a separate title line and value line below it (clipped from the left,
+    `…/end/of/path`, since the end is what tells stacks apart and a workspace path needs the
+    full line's width) — no separate column header above the cards, since a single-column
+    header never matched a card layout. Cards do **not** show ports — that's the dedicated
+    Ports sub-tab (see below) — since a card is cramped and ports only matter when you're
+    about to open one. Selection is shown by shape, not color (color is the container
     state): the selected card gets a heavy bold border (`┏━┓`), rather than reversing the
     content too, which looked noisy. The list always has one
     extra trailing "+ New stack" card past the real stacks, so starting a new one is just
@@ -286,7 +288,7 @@ explicitly allowed, and every request (allowed or denied) is logged.
     the terminal, because an uncaptured subprocess inherits curses' alternate-screen terminal
     and corrupts the display (confirmed: this is exactly what happened before the output was
     captured in `launcher._teardown`).
-  - **Right pane — Proxy settings** (always visible, 2/3 width), its own sub-tab bar:
+  - **Right pane — Proxy settings** (always visible, 3/5 width), its own sub-tab bar:
     - **Domain Statistics**: one row per domain seen in `access.log` for the *active* stack
       (hit count, live ALLOWED/BLOCKED, "Xs ago"). `↑`/`↓` selects a row, `a` allows it if
       BLOCKED, `b` blocks it if ALLOWED. STATUS is checked against the *live* merged whitelist
@@ -295,6 +297,19 @@ explicitly allowed, and every request (allowed or denied) is logged.
       change a row until a fresh request re-proves it, which looks like the action silently did
       nothing. `a` here always writes to the gitignored `whitelist.d/local.txt`
       (`do_allow_domain`), never a tracked file — see the Global/Custom Whitelist split below.
+    - **Ports**: read-only, and scoped to a single stack rather than listing every stack —
+      whichever one is currently selected in the Stacks pane (`self.idx[TAB_STACKS]`, read
+      regardless of which pane has focus, so picking a card on the left and then switching to
+      this tab shows that card's ports). One row per *published* mapping, not one row per
+      stack: `HOST PORT` / `CONTAINER PORT` / `BIND ADDRESS` (`_published_ports` parses
+      `docker ps`'s `.Ports` into this shape, keeping the bind address rather than discarding
+      it — `_format_bind` annotates `127.0.0.1`/`::1` as "(localhost)" and `0.0.0.0`/`::` as
+      "(all interfaces)", since that distinction is exactly what decides whether the port is
+      reachable from outside the host). Docker can publish the same container port on more
+      than one bind address at once (e.g. both `0.0.0.0` and `::`), so those render as separate
+      rows rather than being deduplicated. Only known while the stack's `dev` container is
+      running (docker picks each host port from the env's compose range at start), so a
+      stopped stack's rows read "(none — stack isn't running)".
     - **Global Whitelist**: every domain configured across the **tracked**
       `whitelist.d/*.txt` files only (`00-common.txt` + per-env `*-toolbelt.txt`;
       `read_global_whitelist_entries`) — not local.txt, which gets its own tab. Drawn as two
