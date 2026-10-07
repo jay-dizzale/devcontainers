@@ -302,7 +302,14 @@ explicitly allowed, and every request (allowed or denied) is logged.
     a workspace path needs the full line's width — no separate column header above the cards,
     since a single-column header never matched a card layout. Cards do **not** show ports —
     that's the dedicated Ports sub-tab (see below) — since a card is cramped and ports only
-    matter when you're about to open one. Selection is shown by shape, not color (color is the
+    matter when you're about to open one. The bottom border embeds a "🖥️ VS Code" badge
+    bottom-left (mirroring the env-type badge top-right) when this stack's own container
+    carries the Dev Containers spec's `devcontainer.local_folder` label
+    (`docker_utils.LOCAL_FOLDER`) — set by VS Code's Dev Containers extension (or the
+    `devcontainer` CLI it shells out to) when IT builds/starts the container itself, e.g.
+    "Reopen in Container", never by `docker compose up` through run.py — so it's a reliable
+    "this stack is also open in VS Code" signal, not a guess from the project name or workspace
+    path (`list_all_stacks`/`_card_bottom_border`). Selection is shown by shape, not color (color is the
     container state): the selected card gets a heavy bold border (`┏━┓`), rather than reversing the
     content too, which looked noisy. The list always has one
     extra trailing "+ New stack" card past the real stacks, so starting a new one is just

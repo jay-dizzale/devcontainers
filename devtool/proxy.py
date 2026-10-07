@@ -26,7 +26,7 @@ from pathlib import Path
 
 from . import launcher
 from .docker_utils import (
-    CONFIG_FILES, ENV, ID, KIND, PORTS, PROJECT, REPO_ROOT, STATE, WORKDIR, WORKSPACE,
+    CONFIG_FILES, ENV, ID, KIND, LOCAL_FOLDER, PORTS, PROJECT, REPO_ROOT, STATE, WORKDIR, WORKSPACE,
     die, docker, docker_engine_version, docker_out, proxy_cid_for_project, ps_rows, resolve_stack,
 )
 
@@ -51,11 +51,13 @@ def list_all_stacks():
     # (`devcontainer.kind=service`, see launcher.discover_service_dirs) has no workspace; its
     # card shows the published URL instead (parsed from `.Ports`, "127.0.0.1:3080->8080/tcp").
     seen = {}
-    for project, env, workspace, kind, state, ports in ps_rows("label=devcontainer.env", fields=[PROJECT, ENV, WORKSPACE, KIND, STATE, PORTS]):
+    for project, env, workspace, kind, local_folder, state, ports in ps_rows(
+        "label=devcontainer.env", fields=[PROJECT, ENV, WORKSPACE, KIND, LOCAL_FOLDER, STATE, PORTS]
+    ):
         if project:
             m = re.search(r":(\d+)->8080/tcp", ports)
             url = f"http://localhost:{m.group(1)}" if (m and state == "running") else None
-            seen[project] = (env, workspace, kind or "toolbelt", url, state, ports)
+            seen[project] = (env, workspace, kind or "toolbelt", url, bool(local_folder), state, ports)
 
     proxy_by_project = {
         project: (cid, state == "running")
@@ -64,7 +66,7 @@ def list_all_stacks():
     }
 
     stacks = []
-    for project, (env, workspace, kind, url, state, ports) in sorted(seen.items()):
+    for project, (env, workspace, kind, url, in_vscode, state, ports) in sorted(seen.items()):
         proxy_cid, running = proxy_by_project.get(project, (None, False))
         stacks.append({
             "project": project,
@@ -72,6 +74,7 @@ def list_all_stacks():
             "workspace": workspace,
             "kind": kind,
             "url": url,
+            "in_vscode": in_vscode,  # devcontainer.local_folder set — see docker_utils.LOCAL_FOLDER
             "proxy_cid": proxy_cid,
             "status": "RUNNING" if running else "STOPPED",  # the proxy's state
             # The stack's own container (`dev`, or the service's): docker's state word
@@ -603,6 +606,23 @@ class OverviewApp:
         left_len = max(0, avail - len(text) - 1)
         return box["tl"] + box["h"] * left_len + text + box["h"] + box["tr"]
 
+    @staticmethod
+    def _card_bottom_border(card_w, label, box=_BOX_LIGHT):
+        """The bottom border, with a '🖥️ VS Code' badge embedded bottom-left when this stack's
+        own container carries the Dev Containers spec's `devcontainer.local_folder` label (see
+        docker_utils.LOCAL_FOLDER) — set by VS Code's Dev Containers extension (or the
+        `devcontainer` CLI it shells out to) when IT builds/starts the container, e.g. "Reopen
+        in Container", never by `docker compose up` through run.py. No label (not opened that
+        way, or the "+ New stack" pseudo-card) falls back to a plain border — mirrors
+        _card_top_border, just left-aligned instead of right so it doesn't compete with the
+        env-type badge up top."""
+        avail = max(0, card_w - 2)
+        if not label:
+            return box["bl"] + box["h"] * avail + box["br"]
+        text = f" {label} "[: max(0, avail - 1)]  # keep >=1 dash before the left corner
+        right_len = max(0, avail - len(text) - 1)
+        return box["bl"] + box["h"] + text + box["h"] * right_len + box["br"]
+
     def _draw_stacks_tab(self, stdscr, top, height, x0, w):
         """The list always has one extra trailing row — "+ New stack" — past the real stacks,
         so starting a new one is just another list item (Enter on it) rather than only a
@@ -618,7 +638,9 @@ class OverviewApp:
         layout. The border's color is the stack's own container state — green when it's
         running, red otherwise — and that state is also spelled out top-left in the border
         (" RUNNING "/" EXITED "), so the proxy's state (line 1) and the container's are both
-        visible. Selection is a heavy bold border (shape, not color, since color is taken) —
+        visible. The bottom border embeds a "🖥️ VS Code" badge bottom-left when this stack is
+        also open in VS Code's Dev Containers extension (see _card_bottom_border). Selection is
+        a heavy bold border (shape, not color, since color is taken) —
         a reverse-video border looked like a filled shadow block, and reversing the content
         too (status colors, dimmed id/workspace) looked noisy on top of that."""
         rows = self.rows[TAB_STACKS]
@@ -639,9 +661,10 @@ class OverviewApp:
                 container_up = rows[row_i]["container_state"] == "running"
                 border_attr = curses.color_pair(1 if container_up else 2) | (curses.A_BOLD if selected else 0)
                 label = rows[row_i]["env"]
+            bottom_label = "🖥️ VS Code" if (not is_new_row and rows[row_i]["in_vscode"]) else None
             try:
                 _safe_addnstr(stdscr, y, x0 + 1, self._card_top_border(card_w, label, box), card_w, border_attr)
-                _safe_addnstr(stdscr, y + lines - 1, x0 + 1, box["bl"] + box["h"] * (card_w - 2) + box["br"], card_w, border_attr)
+                _safe_addnstr(stdscr, y + lines - 1, x0 + 1, self._card_bottom_border(card_w, bottom_label, box), card_w, border_attr)
                 for ln in range(1, lines - 1):
                     stdscr.addstr(y + ln, x0 + 1, box["v"], border_attr)
                     stdscr.addstr(y + ln, x0 + card_w, box["v"], border_attr)
