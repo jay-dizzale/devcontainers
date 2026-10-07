@@ -116,6 +116,10 @@ In the Stacks tab:
   image if needed, starts the stack, and drops you into a `zsh` shell. If the environment
   defines more than one service, you'll be asked which one (enter `s` to keep the stack
   running without opening a shell).
+- **Pause a stack without losing it?** `s` stops all of its containers (nothing is deleted);
+  `s` again starts it back up. `d` is the one that deletes a stack.
+
+Each card's border is green while the stack's container is running and red when it isn't.
 
 The same host directory + environment always reconnects to the same stack, so
 re-running `run.py` picks up your existing container instead of rebuilding.

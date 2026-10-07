@@ -1,18 +1,11 @@
-"""devtool/cli.py — top-level argument dispatch for `run.py`, a direct port of the previous
-run.sh's own flag-parsing/dispatch logic. Deliberately NOT argparse-based for the top-level
-loop: flags can appear in any order/repetition exactly as before, and `setup` must be either
-the very first token or immediately follow a single leading `-v`/`--volume <path>` (to match
-what the `dev()` shell function set up by `run.py setup` always prepends:
-`dev() { "<repo>/run.py" -v "$(pwd)" "$@"; }`, so `dev setup` arrives here as `-v <cwd> setup`)
-— argparse's subparsers don't model that shape naturally, so a manual walk mirrors run.sh's
-own loop instead.
+"""devtool/cli.py — top-level argument dispatch for `run.py`. Deliberately NOT argparse: flags
+can appear in any order/repetition, and `setup` must be either the very first token or
+immediately follow a single leading `-v`/`--volume <path>` — the `dev()` shell function set up
+by `run.py setup` always prepends one (`dev() { "<repo>/run.py" -v "$(pwd)" "$@"; }`), so
+`dev setup` arrives here as `-v <cwd> setup`. argparse's subparsers don't model that shape.
 
-There is no `proxy` subcommand: bare `run.py` (no subcommand at all) launches the two-pane
-Stacks / Domain Statistics-Global Whitelist-Custom Whitelist-Access log app directly
-(devtool/proxy.py). Its Stacks pane lists every existing devcontainer stack host-wide (`dev`
-is invoked from all over the place, so this is never scoped to "the current directory") and
-its 'n' action is now the environment picker that used to be a separate plain-text prompt
-here, for whichever directory `run.py` itself was invoked from.
+No subcommand: bare `run.py` launches the two-pane Stacks / proxy-settings app
+(devtool/proxy.py).
 """
 import os
 from pathlib import Path
@@ -25,43 +18,34 @@ run.py — Interactive launcher for docker-compose devcontainer stacks.
 
 Usage:
   ./run.py [-v /path/to/mount] [-r] [--debug] [-f]
-      Opens a two-pane app — Stacks always on the left, Proxy settings on
-      the right (Tab/←/→ to move between the 5 positions, 1-4 to jump
-      straight to a proxy sub-tab, q/Ctrl-C to quit):
-        Stacks           — every devcontainer stack that already exists,
-                       host-wide (not just this directory — `dev` gets
-                       run from all over the place), one bordered card
-                       each with its type, RUNNING/STOPPED, id, workspace;
-                       ➤ marks the one the Proxy pane operates on. ↑/↓
-                       select, `o` open a shell in the selected one
-                       (builds/starts it first if needed), `n` (or Enter
-                       on the trailing "+ New stack" card) opens a modal
-                       to start a brand-new environment for a chosen
-                       folder, Enter switch the active stack without
-                       opening a shell, `a` start its proxy, `b` stop it
-                       (blocks that stack's dev egress until started
-                       again), `d` tear the whole stack down (confirm
-                       first; same as `dev stop`, not the same as `b`).
+      Opens a two-pane app — Stacks on the left, Proxy settings on the
+      right (Tab/←/→ move between the 5 positions, 1-4 jump straight to a
+      proxy sub-tab, q/Ctrl-C quit). The title bar shows whether Docker
+      itself is running.
+        Stacks           — every stack on the host (not just this
+                       directory), one card each: border green while its
+                       container runs, red otherwise; ID, FOLDER, proxy
+                       state; ➤ marks the one the Proxy pane shows. ↑/↓
+                       select, `o` open a shell (builds/starts it first if
+                       needed), `n` (or Enter on "+ New stack") pick a
+                       toolbelt and folder to start, Enter make it the
+                       active stack, `s` stop/start the whole stack
+                       (nothing deleted), `a`/`b` start/stop only its
+                       proxy, `d` delete the stack (confirm first; same
+                       as `dev stop`).
         1 Domain Stats   — every domain seen for the active stack, hits,
-                       live ALLOWED/BLOCKED, last seen. ↑/↓ select, `a`
-                       allow if BLOCKED (always into your personal,
-                       gitignored local.txt), `b` block if ALLOWED.
-        2 Global WL      — every domain in the shared, committed whitelist
-                       files only, which file, exact vs. wildcard. ↑/↓
-                       select, `b` removes it, `n` prompts for a brand-new
-                       domain then asks: common to every environment, or
-                       just this one?
-        3 Custom WL      — every domain in your own personal, gitignored
-                       local.txt. ↑/↓ select, `n` adds (no further prompt
-                       — there's only one target), `b` removes it.
-        4 Access log     — the raw, timestamped log for the active stack,
-                       auto-following until you scroll up (↑/↓); `c`
-                       clears it in place.
-      -r/--debug apply to whatever environment you `o`-pen. -f: passive —
-      redraws the Domain Stats table every 2s, no key handling, for
-      piping/logging or just watching without the controls (Ctrl-C to
-      stop). Piped/non-terminal output (and no -f): one-shot snapshot of
-      Domain Stats plus an "add a domain" prompt (also always local.txt).
+                       live ALLOWED/BLOCKED, last seen. `a` allow (into
+                       your gitignored local.txt), `b` block.
+        2 Global WL      — the shared, committed whitelist files. `b` remove,
+                       `n` add (then: common to every environment, or just
+                       this one?).
+        3 Custom WL      — your gitignored local.txt. `n` add, `b` remove.
+        4 Access log     — the raw log for the active stack, following
+                       until you scroll up (↑/↓); `c` clears it.
+      -r/--debug apply to whatever you start from the app. -f: passive —
+      redraws the Domain Stats table every 2s, no key handling. Piped/
+      non-terminal output (and no -f): one-shot Domain Stats snapshot plus
+      an "add a domain" prompt (also always local.txt).
 
   ./run.py setup
       One-time host setup: git identity, container shell config, CA
@@ -178,8 +162,6 @@ def _run_generic(args, invocation_dir):
         print(f"✅ Base image {launcher.BASE_IMAGE} is ready.")
         return 0
 
-    # No subcommand: the unified two-pane Stacks / proxy-settings app. Its Stacks pane's 'n'
-    # action now covers what the old plain-text environment picker did, so there's nothing
-    # further to branch on here.
+    # No subcommand: the two-pane Stacks / proxy-settings app.
     proxy.cmd_overview(volume, follow, rebuild, debug)
     return 0

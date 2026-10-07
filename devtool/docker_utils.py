@@ -8,19 +8,50 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# `docker ps --format` fields read straight off the ps table — no per-container `inspect`.
+PROJECT = '{{.Label "com.docker.compose.project"}}'
+SERVICE = '{{.Label "com.docker.compose.service"}}'
+WORKDIR = '{{.Label "com.docker.compose.project.working_dir"}}'
+CONFIG_FILES = '{{.Label "com.docker.compose.project.config_files"}}'
+ENV = '{{.Label "devcontainer.env"}}'
+WORKSPACE = '{{.Label "devcontainer.workspace"}}'
+ID, STATE = "{{.ID}}", "{{.State}}"
+
 
 def die(msg):
     print(f"❌ ERROR: {msg}", file=sys.stderr)
     sys.exit(1)
 
 
-def docker(*args):
-    return subprocess.run(["docker", *args], capture_output=True, text=True)
+def docker(*args, timeout=None):
+    return subprocess.run(["docker", *args], capture_output=True, text=True, timeout=timeout)
 
 
 def docker_out(*args):
     r = docker(*args)
     return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def ps_rows(*filters, fields, all_=True):
+    """`docker ps [-a] --filter ... --format <fields joined by |>`, one tuple per container.
+    One CLI call however many containers match."""
+    args = ["ps", "-a"] if all_ else ["ps"]
+    for f in filters:
+        args += ["--filter", f]
+    out = docker_out(*args, "--format", "|".join(fields))
+    n = len(fields) - 1
+    return [tuple(line.split("|", n)) for line in out.splitlines() if line.count("|") >= n]
+
+
+def docker_engine_version():
+    """The Docker engine's server version if the daemon answers, else None (daemon stopped,
+    Docker Desktop not started, or no `docker` CLI at all). Bounded by a timeout so a hung
+    daemon socket can't freeze the TUI, which polls this on every refresh."""
+    try:
+        r = docker("version", "--format", "{{.Server.Version}}", timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
 def is_running(cid):
@@ -30,54 +61,30 @@ def is_running(cid):
 def proxy_cid_for_project(project):
     """The `proxy` container ID for a compose project, running or not — callers check
     is_running() themselves."""
-    out = docker_out(
-        "ps", "-a", "-q",
-        "--filter", f"label=com.docker.compose.project={project}",
-        "--filter", "label=com.docker.compose.service=proxy",
-    )
-    cids = out.split()
-    return cids[0] if cids else None
+    rows = ps_rows(f"label=com.docker.compose.project={project}", "label=com.docker.compose.service=proxy", fields=[ID])
+    return rows[0][0] if rows else None
 
 
 def resolve_stack(target_dir, required=True):
-    """Returns (project, env, workspace) for the stack mounted from target_dir. `workspace`
-    comes from the container's own `devcontainer.workspace` label (not just echoed back from
-    target_dir) so it reflects exactly what Docker recorded. Prompts (plain input()) if more
-    than one stack is running from that directory. With `required=False`, returns None instead
-    of dying when nothing matches — used by the Stacks tab, where "no stack yet for this
-    directory" is an expected, recoverable state, not an error."""
+    """Returns (project, env, workspace) for the stack mounted from target_dir, found by its
+    `devcontainer.workspace` label (set to the same absolute path as the /workspace mount).
+    Prompts (plain input()) if more than one stack is running from that directory. With
+    `required=False`, returns None instead of dying when nothing matches — used by the Stacks
+    tab, where "no stack yet for this directory" is an expected, recoverable state."""
     print(f"🔍 Looking for containers mounted from: {target_dir}", file=sys.stderr)
-    candidates = docker_out("ps", "-a", "-q", "--filter", "label=devcontainer.env").split()
-    if not candidates:
-        if not required:
-            return None
-        die("No devcontainer stacks found.")
-
-    mount_fmt = '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}'
-    matches = [cid for cid in candidates if docker_out("inspect", cid, "--format", mount_fmt) == target_dir]
-    if not matches:
+    triples = sorted(set(ps_rows(f"label=devcontainer.workspace={target_dir}", fields=[PROJECT, ENV, WORKSPACE])))
+    if not triples:
         if not required:
             return None
         die(f"No containers mounted from {target_dir}.")
-
-    info_fmt = (
-        '{{index .Config.Labels "com.docker.compose.project"}}|'
-        '{{index .Config.Labels "devcontainer.env"}}|'
-        '{{index .Config.Labels "devcontainer.workspace"}}'
-    )
-    triples = sorted({docker_out("inspect", cid, "--format", info_fmt) for cid in matches})
-
     if len(triples) == 1:
-        project, env, workspace = triples[0].split("|", 2)
-        return project, env, workspace
+        return triples[0]
 
     print("🐳 Multiple stacks running from this directory:", file=sys.stderr)
-    for i, pe in enumerate(triples, 1):
-        _, env, _ = pe.split("|", 2)
+    for i, (_, env, _) in enumerate(triples, 1):
         print(f"  [{i}] {env}", file=sys.stderr)
     choice = input("Select: ")
     try:
-        project, env, workspace = triples[int(choice) - 1].split("|", 2)
-        return project, env, workspace
+        return triples[int(choice) - 1]
     except (ValueError, IndexError):
         die(f"Invalid selection: {choice}")

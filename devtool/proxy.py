@@ -1,35 +1,15 @@
-"""devtool/proxy.py — the two-pane app that bare `run.py` launches by default: Stacks
-permanently on the left (1/3 width), proxy settings (Domain Statistics/Global Whitelist/
-Custom Whitelist/Access log, their own small sub-tab bar) permanently on the right (2/3
-width). There is no separate `proxy` subcommand anymore. The Stacks pane lists every
-devcontainer stack that already exists, host-wide (`dev`/`run.py` gets invoked from all over
-the place, so this is never scoped to "the current directory") — `o` on a row opens a shell
-in it (building/starting first if needed), `n` starts a brand-new environment for the
-directory `run.py` was invoked from (the plain-text picker that used to be bare `run.py`'s
-whole job). Both tear the TUI down first since a real interactive zsh session can't run
-inside curses' alternate screen. start/stop/clear-log/allow are actions inside whichever
-pane/sub-tab is focused (Stacks for start/stop, Access log for clear, Global/Custom Whitelist
-for allow/remove), so there's exactly one thing to remember how to invoke: `run.py`.
+"""devtool/proxy.py — the two-pane curses app that bare `run.py` launches: Stacks on the left
+(1/3 width — every devcontainer stack on the host, not just the current directory's),
+proxy settings on the right (2/3 width — Domain Statistics/Global Whitelist/Custom
+Whitelist/Access log sub-tabs). 'o'/'n' tear the TUI down first, since a
+real interactive zsh session can't run inside curses' alternate screen, then come back to it.
+Non-tty: a one-shot Domain Statistics snapshot; `-f`: a passive 2s-redraw loop.
 
-Moved here from common/proxy/ctl.py when `run.sh`/`setup.sh` were rewritten as the unified
-`devtool` package + `run.py` — `common/` stays container-build/runtime material only (the
-Squid sidecar's Dockerfile/squid.conf/entrypoint.sh/whitelist.d/ are still there), while this
-host-side CLI module lives alongside the rest of the Python tool. `run.py`'s dispatcher
-(devtool/cli.py) calls cmd_overview() directly in-process — no subprocess exec, no env-var
-indirection needed to cross a shell/Python boundary like the old ctl.py had to.
-
-Stdlib only (subprocess/curses — no pip install, no `docker` SDK). All Docker interaction
-shells out to the `docker` CLI, mirroring what a hand-rolled POSIX-sh version did before this
-— ported to Python specifically because that shell version hit two real cross-platform bugs on
-macOS (an `awk -v` call with an embedded multi-line value failing on macOS's default awk but
-not gawk; `sed -i` needing a different flag form on BSD vs. GNU sed) and had an unverified
-third risk (hand-parsed arrow-key escape sequences, which aren't identical across every
-terminal). Python + the stdlib `curses` module removes all three risk classes structurally: no
-awk/sed of any kind is used here, and curses normalizes arrow-key input across terminals
-itself.
-
-See AGENTS.md's "Egress proxy and domain whitelist" section for the full architecture this
-is one piece of.
+Stdlib only (subprocess/curses — no pip install, no `docker` SDK). Ported from a POSIX-sh
+version after real cross-platform bugs on macOS (awk -v with a multi-line value, BSD vs. GNU
+`sed -i`) and unreliable hand-parsed arrow keys: whitelist edits here are plain file I/O, and
+key input goes through curses (plus _read_key's arrow reassembly). See AGENTS.md's "Egress
+proxy and domain whitelist" section for the full architecture.
 """
 import contextlib
 import curses
@@ -39,7 +19,10 @@ import time
 from pathlib import Path
 
 from . import launcher
-from .docker_utils import REPO_ROOT, die, docker, docker_out, proxy_cid_for_project, resolve_stack
+from .docker_utils import (
+    CONFIG_FILES, ENV, ID, PROJECT, REPO_ROOT, STATE, WORKDIR, WORKSPACE,
+    die, docker, docker_engine_version, docker_out, proxy_cid_for_project, ps_rows, resolve_stack,
+)
 
 WHITELIST_DIR = REPO_ROOT / "common" / "proxy" / "whitelist.d"
 # Where do_allow_domain always writes (see below) — gitignored, so a domain added through the
@@ -58,41 +41,30 @@ def list_all_stacks():
     shell in any of them (`o`), and start/stop any stack's proxy — all without first `cd`-ing
     into its workspace. Starting a brand-new environment is a separate action (`n`, see
     OverviewApp._new_stack), not a row here — this only ever lists what already exists."""
-    # Two bulk `docker ps --format` calls total, however many stacks exist — not one
-    # `inspect`/`ps` round-trip per stack. `docker ps --format` can read a specific label
-    # (`.Label "key"`) and the container's live state (`.State`) directly off the `ps` table
-    # itself, so neither loop below needs a follow-up `docker inspect` per row.
-    dev_fmt = (
-        '{{.Label "com.docker.compose.project"}}|'
-        '{{.Label "devcontainer.env"}}|'
-        '{{.Label "devcontainer.workspace"}}'
-    )
+    # Two bulk `docker ps --format` calls total, however many stacks exist.
     seen = {}
-    for line in docker_out("ps", "-a", "--filter", "label=devcontainer.env", "--format", dev_fmt).splitlines():
-        if line.count("|") != 2:
-            continue
-        project, env, workspace = line.split("|", 2)
+    for project, env, workspace, state in ps_rows("label=devcontainer.env", fields=[PROJECT, ENV, WORKSPACE, STATE]):
         if project:
-            seen[project] = (env, workspace)
+            seen[project] = (env, workspace, state)
 
-    proxy_fmt = '{{.Label "com.docker.compose.project"}}|{{.ID}}|{{.State}}'
-    proxy_by_project = {}
-    for line in docker_out("ps", "-a", "--filter", "label=com.docker.compose.service=proxy", "--format", proxy_fmt).splitlines():
-        parts = line.split("|", 2)
-        if len(parts) != 3 or not parts[0]:
-            continue
-        project, cid, state = parts
-        proxy_by_project[project] = (cid, state == "running")
+    proxy_by_project = {
+        project: (cid, state == "running")
+        for project, cid, state in ps_rows("label=com.docker.compose.service=proxy", fields=[PROJECT, ID, STATE])
+        if project
+    }
 
     stacks = []
-    for project, (env, workspace) in sorted(seen.items()):
+    for project, (env, workspace, state) in sorted(seen.items()):
         proxy_cid, running = proxy_by_project.get(project, (None, False))
         stacks.append({
             "project": project,
             "env": env,
             "workspace": workspace,
             "proxy_cid": proxy_cid,
-            "status": "RUNNING" if running else "STOPPED",
+            "status": "RUNNING" if running else "STOPPED",  # the proxy's state
+            # The stack's own `dev` container: docker's state word
+            # (running/exited/created/paused/restarting) — the card's border color and label.
+            "container_state": state or "unknown",
         })
 
     return stacks
@@ -104,20 +76,17 @@ def restart_running_proxies():
     `dev` does), so this filters on the compose service name, then double-checks each match's
     config-files label actually includes our proxy.docker-compose.yml, so an unrelated
     project's own "proxy" service (if one somehow exists on the host) is never touched."""
-    cids = docker_out("ps", "-q", "--filter", "label=com.docker.compose.service=proxy").split()
-    running = []
-    for cid in cids:
-        cfg = docker_out("inspect", cid, "--format", '{{index .Config.Labels "com.docker.compose.project.config_files"}}')
-        if "common/proxy.docker-compose.yml" in cfg:
-            running.append(cid)
-
+    running = [
+        (cid, workdir)
+        for cid, cfg, workdir in ps_rows("label=com.docker.compose.service=proxy", fields=[ID, CONFIG_FILES, WORKDIR], all_=False)
+        if "common/proxy.docker-compose.yml" in cfg
+    ]
     if not running:
         print("ℹ️  No running proxy containers right now — the change applies the next time a stack starts.")
         return
 
     print("🔁 Restarting running proxy container(s) so the change takes effect ...")
-    for cid in running:
-        workdir = docker_out("inspect", cid, "--format", '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')
+    for cid, workdir in running:
         label = Path(workdir).name if workdir else "?"
         if docker("restart", cid).returncode == 0:
             print(f"   ✅ {label}")
@@ -134,12 +103,7 @@ def whitelist_files():
 
 
 def read_domains(path):
-    out = []
-    for line in path.read_text().splitlines():
-        s = line.strip()
-        if s and not s.startswith("#"):
-            out.append(s)
-    return out
+    return [s for s in (line.strip() for line in path.read_text().splitlines()) if s and not s.startswith("#")]
 
 
 def read_global_whitelist_entries():
@@ -171,8 +135,12 @@ def read_custom_whitelist_entries():
     ]
 
 
+def _files_listing(domain):
+    return [f for f in whitelist_files() if domain in read_domains(f)]
+
+
 def _write_new_domain(target, domain):
-    hits = [f for f in whitelist_files() if domain in read_domains(f)]
+    hits = _files_listing(domain)
     if hits:
         names = " ".join(f.name for f in hits)
         print(f"ℹ️  '{domain}' is already whitelisted (in {names}).")
@@ -211,7 +179,7 @@ def do_block_domain(domain):
     infrastructure-toolbelt.txt list). No-op, clearly reported, if the domain isn't literally
     listed anywhere — e.g. it's only reachable via a broader pattern like the leading-dot
     .amazonaws.com wildcard, which has to be edited by hand."""
-    hits = [f for f in whitelist_files() if domain in read_domains(f)]
+    hits = _files_listing(domain)
     if not hits:
         print(f"⚠️  '{domain}' isn't literally listed in any whitelist.d file — it's likely allowed by a")
         print("   broader pattern (e.g. a leading-dot wildcard like .amazonaws.com); edit that by hand.")
@@ -246,23 +214,12 @@ def extract_host(url):
 
 
 def read_live_whitelist(cid):
-    out = docker_out("exec", cid, "cat", "/etc/squid/whitelist.txt")
-    exact, wildcards = set(), []
-    for line in out.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if line.startswith("."):
-            wildcards.append(line)
-        else:
-            exact.add(line)
-    return exact, wildcards
+    entries = docker_out("exec", cid, "cat", "/etc/squid/whitelist.txt").split()
+    return {e for e in entries if not e.startswith(".")}, [e for e in entries if e.startswith(".")]
 
 
 def is_allowed(host, exact, wildcards):
-    if host in exact:
-        return True
-    return any(host.endswith(w) for w in wildcards)
+    return host in exact or any(host.endswith(w) for w in wildcards)
 
 
 def parse_access_log(cid):
@@ -277,13 +234,9 @@ def parse_access_log(cid):
             ts = float(parts[0])
         except ValueError:
             continue
-        code = parts[3].split("/")[0]
-        method = parts[5]
-        url = parts[6]
-        host = extract_host(url)
-        if not host:
-            continue
-        rows.append({"ts": ts, "code": code, "method": method, "url": url, "host": host})
+        host = extract_host(parts[6])
+        if host:
+            rows.append({"ts": ts, "code": parts[3].split("/")[0], "method": parts[5], "url": parts[6], "host": host})
     rows.sort(key=lambda r: r["ts"])
     return rows
 
@@ -315,27 +268,22 @@ def fetch_domain_rows(cid, log_rows=None):
 
 
 # ---------------------------------------------------------------------------
-# The bare `proxy` command — three modes: piped/non-tty snapshot, passive --follow, or the
-# interactive two-pane curses app.
+# Plain-text modes: piped/non-tty snapshot and passive --follow.
 # ---------------------------------------------------------------------------
-def format_domain_table(rows):
-    lines = [f"   {'DOMAIN':<40} {'HITS':>6}  {'STATUS':<9} LAST SEEN"]
-    now = time.time()
-    for r in rows:
-        ago = int(now - r["last"])
-        lines.append(f"   {r['host']:<40} {r['count']:>6}  {r['verdict']:<9} {ago}s ago")
-    return lines
+def _overview_text(cid, env, project, workspace):
+    rows = fetch_domain_rows(cid)
+    lines = [f"📡 Egress overview — '{env}' (project {project}, {workspace})  [{time.strftime('%H:%M:%S')}]", ""]
+    if not rows:
+        lines.append("   (no traffic logged yet)")
+    else:
+        now = time.time()
+        lines.append(f"   {'DOMAIN':<40} {'HITS':>6}  {'STATUS':<9} LAST SEEN")
+        lines += [f"   {r['host']:<40} {r['count']:>6}  {r['verdict']:<9} {int(now - r['last'])}s ago" for r in rows]
+    return "\n".join(lines) + "\n"
 
 
 def run_snapshot(cid, env, project, workspace):
-    rows = fetch_domain_rows(cid)
-    print(f"📡 Egress overview — '{env}' (project {project}, {workspace})  [{time.strftime('%H:%M:%S')}]")
-    print()
-    if not rows:
-        print("   (no traffic logged yet)")
-    else:
-        print("\n".join(format_domain_table(rows)))
-    print()
+    print(_overview_text(cid, env, project, workspace))
     try:
         new_domain = input("➕ Add a domain to local.txt (not tracked by git; Enter to skip): ").strip()
     except EOFError:
@@ -347,21 +295,12 @@ def run_snapshot(cid, env, project, workspace):
 def run_follow(cid, env, project, workspace):
     try:
         while True:
-            rows = fetch_domain_rows(cid)
-            print("\033[2J\033[H", end="")
-            print(f"📡 Egress overview — '{env}' (project {project}, {workspace})  [{time.strftime('%H:%M:%S')}]")
-            print()
-            if not rows:
-                print("   (no traffic logged yet)")
-            else:
-                print("\n".join(format_domain_table(rows)))
-            print()
-            print("(Ctrl-C to stop watching)")
-            sys.stdout.flush()
+            # Fetch first, then clear + print in one go — no blank-screen flicker per redraw.
+            text = _overview_text(cid, env, project, workspace)
+            print("\033[2J\033[H" + text + "\n(Ctrl-C to stop watching)", flush=True)
             time.sleep(2)
     except KeyboardInterrupt:
-        print()
-        print("👋 Stopped watching.")
+        print("\n👋 Stopped watching.")
 
 
 TAB_STACKS, TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG = range(5)
@@ -408,12 +347,25 @@ def _safe_addnstr(stdscr, y, x, s, n, attr=0):
         pass
 
 
+def _draw_box(stdscr, y0, x0, box_h, box_w, title):
+    """An empty bordered box with a centered title — the frame of every modal."""
+    for yy in range(box_h):
+        if yy == 0:
+            line = "┌" + "─" * (box_w - 2) + "┐"
+        elif yy == box_h - 1:
+            line = "└" + "─" * (box_w - 2) + "┘"
+        else:
+            line = "│" + " " * (box_w - 2) + "│"
+        _safe_addnstr(stdscr, y0 + yy, x0, line, box_w, curses.color_pair(3))
+    title = f" {title} "
+    _safe_addnstr(stdscr, y0, x0 + max(1, (box_w - len(title)) // 2), title, box_w - 2, curses.color_pair(3) | curses.A_BOLD)
+
+
 class OverviewApp:
-    """The interactive curses app behind the bare `proxy` command: a permanent two-pane
-    split — Stacks always visible on the left 1/3, the proxy settings (Domain Statistics/
-    Global Whitelist/Custom Whitelist/Access log, switchable via their own sub-tab bar) on
-    the right 2/3. Exactly one pane has input focus at a time (self.focus); Tab/←/→ moves
-    focus between the two panes."""
+    """The interactive curses app bare `run.py` opens: a permanent two-pane split — Stacks
+    always visible on the left 1/3, the proxy settings (Domain Statistics/Global Whitelist/
+    Custom Whitelist/Access log, switchable via their own sub-tab bar) on the right 2/3.
+    Exactly one pane has input focus at a time (self.focus); Tab/←/→ moves focus."""
 
     def __init__(self, cid, env, project, workspace, target_dir):
         self.cid = cid
@@ -430,6 +382,7 @@ class OverviewApp:
         self.message = ""
         self.last_refresh = 0.0
         self.pending_action = None    # set by 'o' (open shell) — breaks the main loop to act on
+        self.docker_version = None    # Docker engine version, None = daemon not reachable (title bar)
 
     def current_tab(self):
         """Which tab's rows/selection respond to ↑/↓ and action keys right now — the
@@ -455,6 +408,7 @@ class OverviewApp:
             self.proxy_tab = PROXY_TABS[pos - 1]
 
     def refresh(self):
+        self.docker_version = docker_engine_version()
         self.rows[TAB_STACKS] = list_all_stacks()
         log_rows = parse_access_log(self.cid) if self.cid else []
         self.rows[TAB_LOG] = log_rows
@@ -481,6 +435,15 @@ class OverviewApp:
         pad = max(0, w - len(name))
         sep = ("─" * (pad // 2)) + name + ("─" * (pad - pad // 2))
         _safe_addnstr(stdscr, 0, 0, sep[:w], w, curses.color_pair(3) | curses.A_BOLD)
+
+        # Docker engine status, top-left: when the daemon is down every docker call quietly
+        # returns nothing, so without this an empty Stacks pane looks like "no stacks" rather
+        # than "Docker isn't running".
+        if self.docker_version:
+            engine, engine_attr = f" ● Docker running (v{self.docker_version}) ", curses.color_pair(1) | curses.A_BOLD
+        else:
+            engine, engine_attr = " ● Docker stopped ", curses.color_pair(2) | curses.A_BOLD | curses.A_REVERSE
+        _safe_addnstr(stdscr, 0, 1, engine, max(0, w - 2), engine_attr)
 
         credit = " made by jay-dizzale 🐳 "
         if len(credit) < w:
@@ -531,7 +494,7 @@ class OverviewApp:
         common = "←/→ move · Tab jump pane · q quit"
         tab = self.current_tab()
         if tab == TAB_STACKS:
-            return f"↑/↓ select · o open shell · n new stack · Enter switch/new · a start proxy · b stop proxy · d delete stack · {common}"
+            return f"↑/↓ select · o open shell · n new stack · Enter switch/new · s start/stop stack · a start proxy · b stop proxy · d delete stack · {common}"
         sub = "1/2/3/4 sub-tab · "
         if tab == TAB_DOMAINS:
             return f"↑/↓ select · a allow (→ local.txt) · b block · {sub}{common}"
@@ -541,7 +504,7 @@ class OverviewApp:
             return f"↑/↓ select · n new (local.txt) · b remove · {sub}{common}"
         return f"↑/↓ scroll · c clear log · {sub}{common}"
 
-    def _visible_window(self, tab, n_rows, height, lines_per_row=1, header_rows=1):
+    def _visible_window(self, tab, n_rows, height, lines_per_row=1, header_rows=1, idx=None):
         """Clamp-to-view scrolling: keeps self.idx[tab] inside [scroll, scroll+visible)
         by adjusting self.scroll[tab], then returns (start, visible) for the caller to
         slice rows[start:start+visible]. Without this, a selection moved past the first
@@ -552,10 +515,12 @@ class OverviewApp:
         entries while still budgeting the right number of terminal rows. `header_rows`
         reserves that many rows for a column header the caller draws at `top` — the Stacks
         tab passes 0 since its cards have no such header (the type is in the card's own
-        border instead)."""
+        border instead). `idx` overrides the selection's position when the caller scrolls in
+        its own display-line space (the Global Whitelist tab, whose group headers take up
+        lines too)."""
         visible = max(1, (height - header_rows) // lines_per_row)
         scroll = self.scroll[tab]
-        idx = self.idx[tab]
+        idx = self.idx[tab] if idx is None else idx
         if idx < scroll:
             scroll = idx
         elif idx >= scroll + visible:
@@ -564,20 +529,26 @@ class OverviewApp:
         self.scroll[tab] = scroll
         return scroll, visible
 
-    _STACK_ENTRY_LINES = 4  # bordered card: top border, status+id line, workspace, bottom border
+    # bordered card: top border, ID title (+ proxy state), id, FOLDER title, value, bottom border
+    _STACK_ENTRY_LINES = 6
+
+    # Light box-drawing for normal cards, heavy for the selected one — selection can't be a
+    # border color any more, since the color now carries the container's state (green/red).
+    _BOX_LIGHT = {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "─", "v": "│"}
+    _BOX_HEAVY = {"tl": "┏", "tr": "┓", "bl": "┗", "br": "┛", "h": "━", "v": "┃"}
 
     @staticmethod
-    def _card_top_border(card_w, label):
+    def _card_top_border(card_w, label, box=_BOX_LIGHT):
         """The top border with the stack's env type embedded top-right (" java-toolbelt ")
         instead of a separate TYPE column header, which never fit a card layout (it described
         a single column while each card spans the whole row). No label (the "+ New stack"
         pseudo-card) falls back to a plain border."""
         avail = max(0, card_w - 2)
         if not label:
-            return "┌" + "─" * avail + "┐"
+            return box["tl"] + box["h"] * avail + box["tr"]
         text = f" {label} "[: max(0, avail - 1)]  # keep >=1 dash before the right corner
         left_len = max(0, avail - len(text) - 1)
-        return "┌" + "─" * left_len + text + "─┐"
+        return box["tl"] + box["h"] * left_len + text + box["h"] + box["tr"]
 
     def _draw_stacks_tab(self, stdscr, top, height, x0, w):
         """The list always has one extra trailing row — "+ New stack" — past the real stacks,
@@ -588,10 +559,12 @@ class OverviewApp:
         stack id together on the left and the proxy's live state ("PROXY ACTIVE"/"PROXY
         INACTIVE", colored) right-aligned, then the workspace folder on its own line. No
         plain column header above the cards — a single-column header never matched a card
-        layout. Selection highlights only the card's border (bold yellow instead of the
-        surrounding cyan) — a reverse-video border looked like a filled shadow block, and
-        reversing the content too (status colors, dimmed id/workspace) looked noisy on top of
-        that."""
+        layout. The border's color is the stack's own container state — green when it's
+        running, red otherwise — and that state is also spelled out top-left in the border
+        (" RUNNING "/" EXITED "), so the proxy's state (line 1) and the container's are both
+        visible. Selection is a heavy bold border (shape, not color, since color is taken) —
+        a reverse-video border looked like a filled shadow block, and reversing the content
+        too (status colors, dimmed id/workspace) looked noisy on top of that."""
         rows = self.rows[TAB_STACKS]
         total = len(rows) + 1
         lines = self._STACK_ENTRY_LINES
@@ -601,38 +574,65 @@ class OverviewApp:
         for row_i in range(start, min(start + visible, total)):
             y = top + (row_i - start) * lines
             selected = row_i == self.idx[TAB_STACKS]
-            border_attr = (curses.color_pair(4) | curses.A_BOLD) if selected else curses.color_pair(3)
             is_new_row = row_i == len(rows)
-            label = None if is_new_row else rows[row_i]["env"]
+            box = self._BOX_HEAVY if selected else self._BOX_LIGHT
+            if is_new_row:
+                border_attr = (curses.color_pair(4) | curses.A_BOLD) if selected else curses.color_pair(3)
+                label = None
+            else:
+                container_up = rows[row_i]["container_state"] == "running"
+                border_attr = curses.color_pair(1 if container_up else 2) | (curses.A_BOLD if selected else 0)
+                label = rows[row_i]["env"]
             try:
-                _safe_addnstr(stdscr, y, x0 + 1, self._card_top_border(card_w, label), card_w, border_attr)
-                _safe_addnstr(stdscr, y + 3, x0 + 1, "└" + "─" * (card_w - 2) + "┘", card_w, border_attr)
-                for ln in range(1, 3):
-                    stdscr.addch(y + ln, x0 + 1, "│", border_attr)
-                    stdscr.addch(y + ln, x0 + card_w, "│", border_attr)
+                _safe_addnstr(stdscr, y, x0 + 1, self._card_top_border(card_w, label, box), card_w, border_attr)
+                _safe_addnstr(stdscr, y + lines - 1, x0 + 1, box["bl"] + box["h"] * (card_w - 2) + box["br"], card_w, border_attr)
+                for ln in range(1, lines - 1):
+                    stdscr.addstr(y + ln, x0 + 1, box["v"], border_attr)
+                    stdscr.addstr(y + ln, x0 + card_w, box["v"], border_attr)
             except curses.error:
                 pass  # card clipped by the pane edge — harmless to skip
 
+            if not is_new_row:
+                # Container state top-left in the border, only where it doesn't collide with
+                # the env label on the right (narrow pane: the label wins).
+                state_text = f" {rows[row_i]['container_state'].upper()} "
+                if 3 + len(state_text) + len(label) + 4 <= card_w:
+                    _safe_addnstr(stdscr, y, x0 + 3, state_text, len(state_text), border_attr | curses.A_BOLD)
+
             if is_new_row:
-                _safe_addnstr(stdscr, y + 1, x0 + 3, "+ New stack", max(0, card_w - 4), curses.color_pair(4) | curses.A_BOLD)
+                _safe_addnstr(stdscr, y + 2, x0 + 3, "+ New stack", max(0, card_w - 4), curses.color_pair(4) | curses.A_BOLD)
                 continue
 
             s = rows[row_i]
             is_active = s["project"] and s["project"] == self.project
             running = s["status"] == "RUNNING"
-            # Content attrs never change with selection — only the border (above) does, so
-            # the highlight reads as "this card" rather than painting the text too.
+            # Labeled fields: a title line (cyan, bold) with its value on the line below (bold,
+            # not dimmed) — ID, then FOLDER. Content attrs never change
+            # with selection — only the border (above) does, so the highlight reads as "this
+            # card" rather than painting the text too.
+            title_attr = curses.color_pair(3) | curses.A_BOLD
+            value_attr = curses.A_BOLD
             status_attr = curses.color_pair(1) if running else curses.color_pair(2)
-            detail_attr = curses.A_DIM
             marker_attr = curses.color_pair(4) | curses.A_BOLD if is_active else curses.A_NORMAL
-            marker = "➤ " if is_active else "  "
-            _safe_addnstr(stdscr, y + 1, x0 + 3, marker, 2, marker_attr)
+            inner_w = max(0, card_w - 6)  # value column: x0+5 .. inside the right border
+
+            _safe_addnstr(stdscr, y + 1, x0 + 3, "➤ " if is_active else "  ", 2, marker_attr)
+            _safe_addnstr(stdscr, y + 1, x0 + 5, "ID", inner_w, title_attr)
             status_text = "PROXY ACTIVE" if running else "PROXY INACTIVE"
-            status_x = max(x0 + 6, x0 + card_w - 1 - len(status_text))
-            id_max_w = max(0, status_x - (x0 + 5) - 1)  # clip the id *before* status, not under it
-            _safe_addnstr(stdscr, y + 1, x0 + 5, f"id: {s['project']}", id_max_w, detail_attr)
-            _safe_addnstr(stdscr, y + 1, status_x, status_text, max(0, card_w - 4), status_attr)
-            _safe_addnstr(stdscr, y + 2, x0 + 3, s["workspace"], max(0, card_w - 4), detail_attr)
+            status_x = max(x0 + 8, x0 + card_w - 1 - len(status_text))
+            _safe_addnstr(stdscr, y + 1, status_x, status_text, max(0, x0 + card_w - status_x), status_attr)
+            _safe_addnstr(stdscr, y + 2, x0 + 5, s["project"], inner_w, value_attr)
+
+            _safe_addnstr(stdscr, y + 3, x0 + 5, "FOLDER", inner_w, title_attr)
+            _safe_addnstr(stdscr, y + 4, x0 + 5, self._tail(s["workspace"], inner_w), inner_w, value_attr)
+
+    @staticmethod
+    def _tail(text, width):
+        """Clip from the LEFT ("…/end/of/path") — the end of a folder path is the part that
+        tells stacks apart, so it's the part that has to stay visible in a narrow pane."""
+        if width <= 0 or len(text) <= width:
+            return text
+        return "…" + text[-(width - 1):] if width > 1 else text[-1:]
 
     def _draw_domain_tab(self, stdscr, top, height, x0, w):
         rows = self.rows[TAB_DOMAINS]
@@ -683,15 +683,8 @@ class OverviewApp:
             if i == self.idx[TAB_WHITELIST]:
                 selected_i = len(lines) - 1
 
-        visible = max(1, height - 1)
-        scroll = self.scroll[TAB_WHITELIST]  # here: first visible *display line*, not row
-        if selected_i < scroll:
-            scroll = selected_i
-        elif selected_i >= scroll + visible:
-            scroll = selected_i - visible + 1
-        scroll = max(0, min(scroll, max(0, len(lines) - visible)))
-        self.scroll[TAB_WHITELIST] = scroll
-
+        # self.scroll[TAB_WHITELIST] is in display lines here, not rows.
+        scroll, visible = self._visible_window(TAB_WHITELIST, len(lines), height, idx=selected_i)
         for row_i, line in enumerate(lines[scroll : scroll + visible]):
             y = top + 1 + row_i
             if line[0] == "header":
@@ -745,8 +738,27 @@ class OverviewApp:
             _safe_addnstr(stdscr, top + visible, x0 + 2, f"-- scrolled back {self.log_offset} — ↓ to catch up --", max(0, w - 2), curses.color_pair(3) | curses.A_DIM)
 
     # -- input ----------------------------------------------------------
+    def _bindings(self, stdscr):
+        """Action keys per tab (case-insensitive). A handler returning False quits the main
+        loop (with self.pending_action set when the caller should act on something)."""
+        return {
+            TAB_STACKS: {
+                "o": self._open_shell_selected,
+                "n": lambda: self._new_stack(stdscr),
+                "s": lambda: self._toggle_selected_stack(stdscr),
+                "a": lambda: self._set_selected_proxy(True),
+                "b": lambda: self._set_selected_proxy(False),
+                "d": lambda: self._delete_selected_stack(stdscr),
+            },
+            TAB_DOMAINS: {"a": self._allow_selected, "b": self._block_selected_domain},
+            TAB_WHITELIST: {"b": lambda: self._remove_selected_entry(TAB_WHITELIST), "n": lambda: self._prompt_new_global_domain(stdscr)},
+            TAB_CUSTOM: {"b": lambda: self._remove_selected_entry(TAB_CUSTOM), "n": lambda: self._prompt_new_domain(stdscr)},
+            TAB_LOG: {"c": self._clear_log},
+        }
+
     def handle_key(self, stdscr, key):
         self.message = ""
+        tab = self.current_tab()
         if key in (ord("q"), ord("Q")):
             return False
         if key == curses.KEY_RIGHT:
@@ -755,41 +767,19 @@ class OverviewApp:
             self._set_pane_pos(self._pane_pos() - 1)
         elif key == 9:  # Tab — quick jump straight between the two panes
             self._set_pane_pos(0 if self.focus == "proxy" else 1)
-        elif key in (ord("1"), ord("2"), ord("3"), ord("4")):
+        elif ord("1") <= key <= ord("4"):
             self.focus = "proxy"
             self.proxy_tab = PROXY_TABS[key - ord("1")]
-        elif key == curses.KEY_UP:
-            self._move(-1)
-        elif key == curses.KEY_DOWN:
-            self._move(1)
-        elif key in (10, 13, curses.KEY_ENTER) and self.current_tab() == TAB_STACKS:
+        elif key in (curses.KEY_UP, curses.KEY_DOWN):
+            self._move(-1 if key == curses.KEY_UP else 1)
+        elif key in (10, 13, curses.KEY_ENTER) and tab == TAB_STACKS:
             if self.idx[TAB_STACKS] == len(self.rows[TAB_STACKS]):  # the "+ New stack" row
-                return self._new_stack(stdscr)
+                return self._new_stack(stdscr) is not False
             self._switch_to_selected_stack()
-        elif key in (ord("o"), ord("O")) and self.current_tab() == TAB_STACKS:
-            return self._open_shell_selected()
-        elif key in (ord("n"), ord("N")) and self.current_tab() == TAB_STACKS:
-            return self._new_stack(stdscr)
-        elif key in (ord("a"), ord("A")) and self.current_tab() == TAB_STACKS:
-            self._start_selected_stack()
-        elif key in (ord("b"), ord("B")) and self.current_tab() == TAB_STACKS:
-            self._stop_selected_stack()
-        elif key in (ord("d"), ord("D")) and self.current_tab() == TAB_STACKS:
-            self._delete_selected_stack(stdscr)
-        elif key in (ord("a"), ord("A")) and self.current_tab() == TAB_DOMAINS:
-            self._allow_selected()
-        elif key in (ord("b"), ord("B")) and self.current_tab() == TAB_DOMAINS:
-            self._block_selected_domain()
-        elif key in (ord("b"), ord("B")) and self.current_tab() == TAB_WHITELIST:
-            self._remove_selected_entry(TAB_WHITELIST)
-        elif key in (ord("n"), ord("N")) and self.current_tab() == TAB_WHITELIST:
-            self._prompt_new_global_domain(stdscr)
-        elif key in (ord("b"), ord("B")) and self.current_tab() == TAB_CUSTOM:
-            self._remove_selected_entry(TAB_CUSTOM)
-        elif key in (ord("n"), ord("N")) and self.current_tab() == TAB_CUSTOM:
-            self._prompt_new_domain(stdscr)
-        elif key in (ord("c"), ord("C")) and self.current_tab() == TAB_LOG:
-            self._clear_log()
+        elif 0 <= key < 256:
+            handler = self._bindings(stdscr)[tab].get(chr(key).lower())
+            if handler and handler() is False:
+                return False
         return True
 
     def _move(self, delta):
@@ -806,11 +796,13 @@ class OverviewApp:
             self.log_offset = max(0, min(max(0, n - 1), self.log_offset - delta))
 
     # -- Stacks tab -------------------------------------------------------
+    def _selected(self, tab):
+        """The selected row of `tab`, or None (empty list / the Stacks "+ New stack" row)."""
+        rows = self.rows[tab]
+        return rows[self.idx[tab]] if self.idx[tab] < len(rows) else None
+
     def _selected_stack(self):
-        rows = self.rows[TAB_STACKS]
-        if not rows or self.idx[TAB_STACKS] >= len(rows):
-            return None
-        return rows[self.idx[TAB_STACKS]]
+        return self._selected(TAB_STACKS)
 
     def _switch_to_selected_stack(self):
         s = self._selected_stack()
@@ -833,7 +825,7 @@ class OverviewApp:
         once curses.wrapper has torn the TUI down and restored the normal terminal."""
         s = self._selected_stack()
         if not s:
-            return True
+            return None
         self.pending_action = ("open_shell", s)
         return False
 
@@ -847,7 +839,7 @@ class OverviewApp:
         choice = self._new_stack_modal(stdscr)
         if choice is None:
             self.message = "Cancelled."
-            return True
+            return None
         self.pending_action = ("new_stack", choice)
         return False
 
@@ -902,25 +894,15 @@ class OverviewApp:
         y0 = max(0, (h - box_h) // 2)
         x0 = max(0, (w - box_w) // 2)
 
-        for yy in range(box_h):
-            if yy == 0:
-                line = "┌" + "─" * (box_w - 2) + "┐"
-            elif yy == box_h - 1:
-                line = "└" + "─" * (box_w - 2) + "┘"
-            else:
-                line = "│" + " " * (box_w - 2) + "│"
-            try:
-                _safe_addnstr(stdscr, y0 + yy, x0, line, box_w, curses.color_pair(3))
-            except curses.error:
-                pass
-
-        title = " New devcontainer stack "
-        _safe_addnstr(stdscr, y0, x0 + max(1, (box_w - len(title)) // 2), title, box_w - 2, curses.color_pair(3) | curses.A_BOLD)
+        _draw_box(stdscr, y0, x0, box_h, box_w, "New stack")
 
         list_top = y0 + 2
-        for i, name in enumerate(names[:n_visible]):
-            cursor = "→ " if i == idx else "  "
-            if i == idx:
+        # Keep the selection in view when the list is taller than the box.
+        first = max(0, min(idx - n_visible + 1, len(names) - n_visible)) if idx >= n_visible else 0
+        for i, name in enumerate(names[first : first + n_visible]):
+            line_i = first + i
+            cursor = "→ " if line_i == idx else "  "
+            if line_i == idx:
                 attr = curses.A_REVERSE if focus == "type" else (curses.color_pair(4) | curses.A_BOLD)
             else:
                 attr = curses.A_NORMAL
@@ -953,7 +935,7 @@ class OverviewApp:
         delete's `docker compose down -v` result) instead of a one-line footer message or
         letting the subprocess print straight to the real terminal underneath curses (which
         is what corrupted the Stacks tab's view before teardown's output was captured —
-        see launcher._teardown_containers). Blocks until dismissed (Enter/Esc/q)."""
+        see launcher._teardown). Blocks until dismissed (Enter/Esc/q)."""
         lines = text.splitlines() or ["(no output)"]
         offset = 0
 
@@ -968,20 +950,7 @@ class OverviewApp:
                 y0 = max(0, (h - box_h) // 2)
                 x0 = max(0, (w - box_w) // 2)
 
-                for yy in range(box_h):
-                    if yy == 0:
-                        line = "┌" + "─" * (box_w - 2) + "┐"
-                    elif yy == box_h - 1:
-                        line = "└" + "─" * (box_w - 2) + "┘"
-                    else:
-                        line = "│" + " " * (box_w - 2) + "│"
-                    try:
-                        _safe_addnstr(stdscr, y0 + yy, x0, line, box_w, curses.color_pair(3))
-                    except curses.error:
-                        pass
-
-                shown_title = f" {title} "
-                _safe_addnstr(stdscr, y0, x0 + max(1, (box_w - len(shown_title)) // 2), shown_title, box_w - 2, curses.color_pair(3) | curses.A_BOLD)
+                _draw_box(stdscr, y0, x0, box_h, box_w, title)
 
                 max_offset = max(0, len(lines) - inner_h)
                 offset = max(0, min(offset, max_offset))
@@ -1010,36 +979,64 @@ class OverviewApp:
         finally:
             stdscr.timeout(200)
 
-    def _start_selected_stack(self):
+    def _toggle_selected_stack(self, stdscr):
+        """'s': stop the whole selected stack if its container is running, start it otherwise —
+        every container in the project, nothing deleted (that's 'd'). Unlike 'a'/'b', which
+        only touch the proxy. Blocking (`docker stop` can take a few seconds), so the footer
+        says what's happening before the call."""
         s = self._selected_stack()
         if not s:
             return
-        if not s["proxy_cid"]:
-            self.message = f"⚠️  '{s['env']}' has no proxy container."
-            return
-        if s["status"] == "RUNNING":
-            self.message = f"ℹ️  '{s['env']}' is already running."
-            return
-        ok = docker("start", s["proxy_cid"]).returncode == 0
+        h, w = stdscr.getmaxyx()
+        stopping = s["container_state"] == "running"
+        verb = "Stopping" if stopping else "Starting"
+        _safe_addnstr(stdscr, h - 1, 0, f"⏳ {verb} '{s['env']}' (project {s['project']}) …".ljust(w - 1), w - 1, curses.color_pair(4) | curses.A_BOLD)
+        stdscr.refresh()
+        ok = launcher.stop_stack(s["project"]) if stopping else launcher.start_stack(s["project"])
         self.refresh()
-        self.message = f"✅ Started proxy for '{s['env']}'." if ok else f"⚠️  Failed to start proxy for '{s['env']}'."
+        if stopping:
+            self.message = f"⏹️  Stopped '{s['env']}' — 's' starts it again." if ok else f"⚠️  Failed to stop '{s['env']}'."
+        else:
+            self.message = f"▶️  Started '{s['env']}'." if ok else f"⚠️  Failed to start '{s['env']}' — see docker logs."
 
-    def _stop_selected_stack(self):
+    def _set_selected_proxy(self, start):
+        """'a'/'b': start/stop only the selected stack's proxy (stopping it blocks that
+        stack's egress until started again)."""
         s = self._selected_stack()
         if not s:
             return
+        name = s["env"]
         if not s["proxy_cid"]:
-            self.message = f"⚠️  '{s['env']}' has no proxy container."
+            self.message = f"⚠️  '{name}' has no proxy container."
             return
-        if s["status"] != "RUNNING":
-            self.message = f"ℹ️  '{s['env']}' is already stopped."
+        if (s["status"] == "RUNNING") == start:
+            self.message = f"ℹ️  '{name}' is already {'running' if start else 'stopped'}."
             return
-        ok = docker("stop", s["proxy_cid"]).returncode == 0
+        ok = docker("start" if start else "stop", s["proxy_cid"]).returncode == 0
         self.refresh()
-        self.message = (
-            f"🚫 Stopped proxy for '{s['env']}' — its egress is blocked until started again."
-            if ok else f"⚠️  Failed to stop proxy for '{s['env']}'."
-        )
+        if not ok:
+            self.message = f"⚠️  Failed to {'start' if start else 'stop'} proxy for '{name}'."
+        elif start:
+            self.message = f"✅ Started proxy for '{name}'."
+        else:
+            self.message = f"🚫 Stopped proxy for '{name}' — its egress is blocked until started again."
+
+    def _footer_choice(self, stdscr, prompt, keys, attr):
+        """Show `prompt` on the footer row and block for one of `keys` (lowercase chars) or a
+        bare Esc. Returns the chosen char, or None on Esc."""
+        h, w = stdscr.getmaxyx()
+        _safe_addnstr(stdscr, h - 1, 0, prompt[: w - 1].ljust(w - 1), w - 1, attr)
+        stdscr.refresh()
+        stdscr.timeout(-1)  # block for the choice — resumed by the caller's loop afterward
+        try:
+            while True:
+                key = stdscr.getch()
+                if key == 27:  # bare Esc — no arrow-sequence follow-up expected here
+                    return None
+                if 0 <= key < 256 and chr(key).lower() in keys:
+                    return chr(key).lower()
+        finally:
+            stdscr.timeout(200)
 
     def _delete_selected_stack(self, stdscr):
         """'d': the same teardown as `dev stop`/`run.py stop` (containers, networks, and
@@ -1049,34 +1046,18 @@ class OverviewApp:
         s = self._selected_stack()
         if not s:
             return
-        if not s["proxy_cid"]:
-            self.message = f"⚠️  '{s['env']}' has no container to tear down."
+        prompt = f"Delete stack '{s['env']}' (project {s['project']})? Removes containers, networks & volumes.  [y] confirm   [Esc] cancel"
+        if self._footer_choice(stdscr, prompt, "yn", curses.color_pair(2) | curses.A_BOLD) != "y":
+            self.message = "Cancelled."
             return
 
-        h, w = stdscr.getmaxyx()
-        prompt = f"Delete stack '{s['env']}' (project {s['project']})? Removes containers, networks & volumes.  [y] confirm   [Esc] cancel"
-        _safe_addnstr(stdscr, h - 1, 0, " " * (w - 1), w - 1)
-        _safe_addnstr(stdscr, h - 1, 0, prompt[: w - 1], w - 1, curses.color_pair(2) | curses.A_BOLD)
-        stdscr.refresh()
-        stdscr.timeout(-1)
-        try:
-            while True:
-                key = stdscr.getch()
-                if key in (ord("y"), ord("Y")):
-                    break
-                if key in (27, ord("n"), ord("N")):
-                    self.message = "Cancelled."
-                    return
-        finally:
-            stdscr.timeout(200)
-
         with _quiet_stdout():
-            results = launcher.teardown_stack(s["proxy_cid"])
+            results = launcher.teardown_stack(s["project"])
         if self.project == s["project"]:
             self.cid, self.project, self.env, self.workspace = None, None, None, None
         self.refresh()
 
-        ok = all(r["ok"] for r in results) if results else False
+        ok = bool(results) and all(r["ok"] for r in results)
         self.message = (
             f"🗑️  Deleted stack '{s['env']}' (project {s['project']})." if ok
             else f"⚠️  Problem tearing down '{s['env']}' — see output."
@@ -1089,10 +1070,9 @@ class OverviewApp:
 
     # -- Domains tab --------------------------------------------------------
     def _allow_selected(self):
-        rows = self.rows[TAB_DOMAINS]
-        if not rows or self.idx[TAB_DOMAINS] >= len(rows):
+        r = self._selected(TAB_DOMAINS)
+        if not r:
             return
-        r = rows[self.idx[TAB_DOMAINS]]
         if r["verdict"] != "BLOCKED":
             self.message = f"ℹ️  '{r['host']}' is already allowed."
             return
@@ -1102,10 +1082,9 @@ class OverviewApp:
         self.message = f"✅ Allowed '{r['host']}' (local.txt — not tracked by git)."
 
     def _block_selected_domain(self):
-        rows = self.rows[TAB_DOMAINS]
-        if not rows or self.idx[TAB_DOMAINS] >= len(rows):
+        r = self._selected(TAB_DOMAINS)
+        if not r:
             return
-        r = rows[self.idx[TAB_DOMAINS]]
         if r["verdict"] != "ALLOWED":
             self.message = f"ℹ️  '{r['host']}' is already blocked."
             return
@@ -1121,10 +1100,10 @@ class OverviewApp:
         TAB_CUSTOM — see read_global_whitelist_entries/read_custom_whitelist_entries), so the
         domain being removed is always scoped correctly by virtue of which tab it was
         selected in."""
-        rows = self.rows[tab]
-        if not rows or self.idx[tab] >= len(rows):
+        e = self._selected(tab)
+        if not e:
             return
-        domain = rows[self.idx[tab]]["domain"]
+        domain = e["domain"]
         with _quiet_stdout():
             do_block_domain(domain)
         self.refresh()
@@ -1141,8 +1120,7 @@ class OverviewApp:
         """Blocking single-line text prompt on the footer row — shared by _prompt_new_domain
         and _prompt_new_global_domain. Returns the typed, stripped string, or "" on Esc/empty."""
         h, w = stdscr.getmaxyx()
-        _safe_addnstr(stdscr, h - 1, 0, " " * (w - 1), w - 1)
-        _safe_addnstr(stdscr, h - 1, 0, prompt, w - 1)
+        _safe_addnstr(stdscr, h - 1, 0, prompt[: w - 1].ljust(w - 1), w - 1)
         stdscr.refresh()
 
         curses.curs_set(1)
@@ -1178,37 +1156,15 @@ class OverviewApp:
         if not domain:
             return
 
-        has_env = bool(self.env)
-        h, w = stdscr.getmaxyx()
         prompt = f"Add '{domain}' to:  [c] 00-common.txt (every environment)"
-        if has_env:
+        if self.env:
             prompt += f"   [s] {self.env}.txt (this one only)"
-        prompt += "   [Esc] cancel"
-        _safe_addnstr(stdscr, h - 1, 0, " " * (w - 1), w - 1)
-        _safe_addnstr(stdscr, h - 1, 0, prompt[: w - 1], w - 1, curses.color_pair(3) | curses.A_BOLD)
-        stdscr.refresh()
-
-        stdscr.timeout(-1)  # block for the choice — resumed by the caller's loop afterward
-        choice = None
-        try:
-            while True:
-                key = stdscr.getch()
-                if key in (ord("c"), ord("C")):
-                    choice = "__common__"
-                    break
-                if has_env and key in (ord("s"), ord("S")):
-                    choice = self.env
-                    break
-                if key == 27:  # bare Esc — no arrow-sequence follow-up expected here
-                    break
-        finally:
-            stdscr.timeout(200)
-
+        choice = self._footer_choice(stdscr, prompt + "   [Esc] cancel", "cs" if self.env else "c", curses.color_pair(3) | curses.A_BOLD)
         if choice is None:
             self.message = "Cancelled."
             return
 
-        target_env = None if choice == "__common__" else choice
+        target_env = self.env if choice == "s" else None
         with _quiet_stdout():
             do_allow_domain_global(domain, target_env)
         self.refresh()
@@ -1245,6 +1201,11 @@ def _read_key(stdscr):
 
 def run_app(stdscr, cid, env, project, workspace, target_dir):
     curses.curs_set(0)
+    # ncurses waits ESCDELAY (default 1s) after a bare Esc for a possible escape sequence,
+    # which made Esc at every prompt/modal feel laggy. Arrow keys don't depend on it: their
+    # bytes arrive together, and _read_key reassembles `ESC [ <letter>` itself anyway.
+    if hasattr(curses, "set_escdelay"):  # Python 3.9+
+        curses.set_escdelay(25)
     try:
         curses.start_color()
         curses.use_default_colors()
@@ -1315,7 +1276,6 @@ def cmd_overview(target, follow, rebuild=False, debug=False):
             break
         action, row = pending
         if action == "open_shell":
-            compose_dir = REPO_ROOT / row["env"]
-            launcher.start_and_open_shell(compose_dir, row["workspace"], rebuild, debug)
-        elif action == "new_stack":
+            launcher.start_and_open_shell(REPO_ROOT / row["env"], row["workspace"], rebuild, debug)
+        else:
             launcher.start_and_open_shell(row["compose_dir"], row["folder"], rebuild, debug)

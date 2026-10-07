@@ -234,7 +234,10 @@ explicitly allowed, and every request (allowed or denied) is logged.
   The app is a permanent two-pane interactive `curses` app (falls back to a one-shot
   plain-text snapshot of the Domain Statistics tab if stdin/stdout aren't both a tty, or a
   passive 2s-redraw loop with `-f`/`--follow`, same spirit as `./run.py logs -f`): a title bar
-  (`devcontainers`, credit top-right), then a pane-label row (`STACKS` left, `PROXY` right),
+  (Docker engine status top-left — green "● Docker running (vX)" / red "● Docker stopped",
+  polled on every refresh via `docker_utils.docker_engine_version()` with a 3s timeout, so an
+  empty Stacks pane can't be mistaken for "no stacks" when the daemon is down; `devcontainers`
+  centered; credit top-right), then a pane-label row (`STACKS` left, `PROXY` right),
   then the proxy pane's own sub-tab bar, then the two panes' bodies side by side separated by
   a vertical divider, then a keybinding footer. `Tab`/`←`/`→` walk one step at a time along a
   single line of 5 positions — Stacks(0), then the 4 proxy sub-tabs(1-4) — so going all the
@@ -246,11 +249,17 @@ explicitly allowed, and every request (allowed or denied) is logged.
     stack that already exists, host-wide (`list_all_stacks`) — **not** scoped to the directory
     `run.py` was invoked from: `dev` gets run from all over the host, so every stack on every
     project shows up here regardless. Each card embeds its env type in the top border
-    (top-right), and its first content line has the `➤` active-stack marker + stack id on the
-    left and "PROXY ACTIVE"/"PROXY INACTIVE" (green/red) right-aligned, then the workspace
-    folder on its own line — no separate column header above the cards, since a single-column
-    header never matched a card layout. Selection highlights only the card's border (bold
-    yellow) rather than reversing the content too, which looked noisy. The list always has one
+    (top-right) and the stack's own container state top-left (" RUNNING "/" EXITED " — the
+    `dev` container, from `docker ps`'s `.State`, not the proxy's); the whole border
+    is green when that container is running, red otherwise. Inside, labeled fields — a
+    cyan bold title line with its value (bold, not dimmed) on the line below: `ID` (with the
+    `➤` active-stack marker to its left and "PROXY ACTIVE"/"PROXY INACTIVE" (green/red)
+    right-aligned on the title line), then `FOLDER` (clipped from the left, `…/end/of/path`,
+    since the end is what tells stacks apart) — no separate column
+    header above the cards, since a single-column header never
+    matched a card layout. Selection is shown by shape, not color (color is the container
+    state): the selected card gets a heavy bold border (`┏━┓`), rather than reversing the
+    content too, which looked noisy. The list always has one
     extra trailing "+ New stack" card past the real stacks, so starting a new one is just
     another list item (`Enter` on it) as well as a dedicated key. `↑`/`↓` selects a card, `o`
     builds/starts the selected one if needed and opens a shell in it
@@ -263,14 +272,18 @@ explicitly allowed, and every request (allowed or denied) is logged.
     stderr/stdin toolbelt picker; `Esc` inside the modal cancels back to the Stacks pane
     without doing anything. `Enter` on an existing card makes it the active stack (switches
     `self.cid`/`env`/`project`/`workspace` and refreshes — view-only, doesn't open a shell),
-    `a` starts that stack's proxy (`docker start`), `b` stops it (`docker stop` — blocks that
+    `s` stops the whole stack if its container is running, starts it otherwise
+    (`launcher.stop_stack`/`start_stack` — plain `docker stop`/`docker start` on every container
+    of the compose project, nothing removed; main container stopped before the proxy, proxy
+    started before the main container since `common/entrypoint.sh` must resolve it),
+    `a` starts only that stack's proxy (`docker start`), `b` stops it (`docker stop` — blocks that
     stack's `dev` egress until started again), `d` tears the whole stack down (same as `dev
     stop` — containers, networks, anonymous volumes; NOT the same as `b`) after a confirm
     prompt, then shows the captured `docker compose down -v` output in a scrollable modal
     (`_show_output_modal`) — the subprocess output is captured rather than streamed straight to
     the terminal, because an uncaptured subprocess inherits curses' alternate-screen terminal
     and corrupts the display (confirmed: this is exactly what happened before the output was
-    captured in `launcher._teardown_containers`).
+    captured in `launcher._teardown`).
   - **Right pane — Proxy settings** (always visible, 2/3 width), its own sub-tab bar:
     - **Domain Statistics**: one row per domain seen in `access.log` for the *active* stack
       (hit count, live ALLOWED/BLOCKED, "Xs ago"). `↑`/`↓` selects a row, `a` allows it if
@@ -336,7 +349,7 @@ explicitly allowed, and every request (allowed or denied) is logged.
   - **Colors**: four `curses` color pairs (`run_app`) — green/red for status/verdict
     (RUNNING/ALLOWED vs. STOPPED/BLOCKED/DENIED), cyan for structural chrome (titles, pane
     labels, tab bar, dividers, column headers), yellow for accents (the `➤` marker, "+ New
-    stack", wildcard entries, the selected Stacks card's border). Falls back to no color on a
+    stack" card's border when selected, wildcard entries). Falls back to no color on a
     terminal without color support (`curses.error` around the `init_pair` calls).
   Every tab/sub-tab that can allow/block a domain funnels through `do_allow_domain`/
   `do_allow_domain_global`/`do_block_domain`, which restart **every currently-running** proxy
@@ -365,8 +378,8 @@ explicitly allowed, and every request (allowed or denied) is logged.
 
 # The entire tool — no subcommand. Two-pane TUI: Stacks (left, always visible —
 # 'o' opens a shell in the selected one, building/starting it first if needed;
-# 'n'/Enter on "+ New stack" starts a brand-new one via a modal; 'd' tears a
-# stack down) and Proxy settings (right — Domain Statistics allow/block,
+# 'n'/Enter on "+ New stack" starts a brand-new one via a modal; 's' stops/
+# starts a stack without deleting it; 'd' tears a stack down) and Proxy settings (right — Domain Statistics allow/block,
 # Global Whitelist list/add/remove tracked files, Custom Whitelist list/add/
 # remove the gitignored local.txt, Access log view/clear)
 ./run.py

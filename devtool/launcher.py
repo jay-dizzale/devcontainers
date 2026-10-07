@@ -1,10 +1,7 @@
-"""devtool/launcher.py — `stop`/`list`/`logs`/`build-base`, plus the build+start+open-shell
-logic (`start_and_open_shell`) that both the bare `run.py` picker fallback (non-tty) and the
-Stacks pane's 'o' action in devtool/proxy.py call into. Direct Python port of the previous
-POSIX-sh `run.sh`'s own logic (everything except `proxy`'s own UI, which lives in
-devtool/proxy.py — the default interactive entry point is now that two-pane app, with the
-Stacks pane doubling as the environment picker — and one-time host setup, in
-devtool/hostsetup.py).
+"""devtool/launcher.py — `stop`/`list`/`logs`/`build-base`, stack start/stop/teardown, and the
+build+start logic (`start_and_open_shell`) that the Stacks pane in devtool/proxy.py calls
+into. The interactive UI itself lives in
+devtool/proxy.py; one-time host setup in devtool/hostsetup.py.
 
 Stdlib only — every Docker interaction shells out to the `docker`/`docker compose` CLI via
 devtool/docker_utils.py, no SDK.
@@ -14,11 +11,15 @@ import os
 import signal
 import subprocess
 import sys
-from pathlib import Path
 
-from .docker_utils import REPO_ROOT, die, docker_out, is_running, proxy_cid_for_project, resolve_stack
+from .docker_utils import (
+    ENV, ID, PROJECT, REPO_ROOT, SERVICE, STATE, WORKDIR, WORKSPACE,
+    die, docker_out, is_running, proxy_cid_for_project, ps_rows, resolve_stack,
+)
 
 BASE_IMAGE = "toolbelt-base:latest"  # keep in sync with ARG BASE_IMAGE in <env>/Dockerfile
+PROXY_COMPOSE = REPO_ROOT / "common" / "proxy.docker-compose.yml"
+CONTAINER_NAME_COMPOSE = REPO_ROOT / "common" / "container-name.docker-compose.yml"
 
 
 def pick_from_list(label, items):
@@ -30,172 +31,122 @@ def pick_from_list(label, items):
 
 
 # ---------------------------------------------------------------------------
-# Every container that carries the `devcontainer.env` label set in each
-# <env>/docker-compose.yml, from any directory. Unrelated docker-compose
-# projects on the host are never matched.
+# Teardown — `docker compose down -v` per compose project (containers,
+# networks and non-external volumes removed). Stacks are found by the
+# `devcontainer.env` label set in each <env>/docker-compose.yml, so unrelated
+# docker-compose projects on the host are never matched.
 # ---------------------------------------------------------------------------
-def _all_workspace_containers():
-    return docker_out("ps", "-a", "-q", "--filter", "label=devcontainer.env").split()
+def _project_workdirs(*filters):
+    return sorted({(p, w) for p, w in ps_rows(*filters, fields=[PROJECT, WORKDIR]) if p})
 
 
-def _workspace_mount_source(cid):
-    fmt = '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}'
-    return docker_out("inspect", cid, "--format", fmt)
-
-
-# ---------------------------------------------------------------------------
-# Given a list of container IDs, group them by compose project and tear each
-# project down (containers, networks and anonymous volumes removed).
-# ---------------------------------------------------------------------------
-def _teardown_containers(cids):
+def _teardown(pairs):
     """Returns one result dict per torn-down project — {"project", "workdir", "ok", "output"}
-    — so a caller that wants the teardown output somewhere other than stdout (the Stacks
-    tab's 'd' action shows it in a modal — see devtool/proxy.py's _show_output_modal) has it,
-    while the plain `stop`/`stop --all` CLI path still gets it printed below as before."""
-    fmt = (
-        '{{index .Config.Labels "com.docker.compose.project"}}|'
-        '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
-    )
-    pairs = sorted({docker_out("inspect", cid, "--format", fmt) for cid in cids})
-
+    — so a caller that wants the output somewhere other than stdout (the Stacks tab's 'd'
+    shows it in a modal) has it, while the `stop`/`stop --all` CLI path gets it printed."""
     results = []
-    for pair in pairs:
-        proj, _, workdir = pair.partition("|")
-        if not proj:
-            continue
+    for proj, workdir in pairs:
         print(f"🛑 Stopping & deleting stack '{proj}' (in {workdir}) ...")
-        # capture_output: this can run from inside the Stacks tab's curses session (the 'd'
-        # action, via teardown_stack below) without tearing curses down first, unlike 'o'/'n'.
-        # An uncaptured subprocess inherits the real terminal fds and `docker compose down -v`
-        # prints container/network/volume removal lines straight to it, corrupting the
-        # alternate-screen display underneath curses — confirmed: this is exactly what broke
-        # the Stacks tab's view on delete.
-        if workdir and Path(workdir).is_dir():
-            r = subprocess.run(
-                ["docker", "compose", "down", "-v"],
-                cwd=workdir,
-                env={**os.environ, "COMPOSE_PROJECT_NAME": proj},
-                capture_output=True, text=True,
-            )
+        # capture_output: this also runs from inside the Stacks tab's curses session ('d'),
+        # where an uncaptured subprocess would print straight over the alternate screen —
+        # confirmed: exactly what broke the Stacks tab's view on delete.
+        if workdir and os.path.isdir(workdir):
+            r = subprocess.run(["docker", "compose", "down", "-v"], cwd=workdir,
+                               env={**os.environ, "COMPOSE_PROJECT_NAME": proj}, capture_output=True, text=True)
         else:
             r = subprocess.run(["docker", "compose", "-p", proj, "down", "-v"], capture_output=True, text=True)
 
         output = (r.stdout + r.stderr).strip()
         results.append({"project": proj, "workdir": workdir, "ok": r.returncode == 0, "output": output})
-
         if r.returncode != 0:
             print(f"⚠️  Failed to tear down {proj}", file=sys.stderr)
             if r.stderr:
                 print(r.stderr, file=sys.stderr)
         elif output:
-            # Batched rather than streamed live (capture_output above requires that), but
-            # still surfaced for the plain `stop`/`stop --all` CLI path — only lost when the
-            # caller wraps this in _quiet_stdout() (the Stacks tab's 'd' action), same as the
-            # "🛑 Stopping ..." line above.
             print(output)
     return results
 
 
-def teardown_stack(cid):
-    """Public one-container entry point into _teardown_containers — same teardown as `stop`/
-    `stop --all` (containers, networks, anonymous volumes removed), given any single
-    container ID belonging to the stack's compose project (any service's container carries
-    the same `com.docker.compose.project*` labels, so the Stacks tab's 'd' action in
-    devtool/proxy.py can pass its `proxy` container without needing the `dev` container's id
-    too). Returns _teardown_containers' result list (one entry here, since a single cid
-    belongs to exactly one project) for the caller to show however it likes."""
-    return _teardown_containers([cid])
+def teardown_stack(project):
+    """Same teardown as `stop`/`stop --all`, for one compose project (the Stacks tab's 'd')."""
+    return _teardown(_project_workdirs(f"label=com.docker.compose.project={project}"))
 
 
-# ---------------------------------------------------------------------------
-# `stop` subcommand — find every compose project whose /workspace mount
-# points at the given directory (default: current directory) and tear it
-# down.
-# ---------------------------------------------------------------------------
 def cmd_stop(target):
+    """`stop` — tear down every stack mounted from `target` (default: cwd)."""
     print(f"🔍 Looking for containers mounted from: {target}")
-    candidates = _all_workspace_containers()
-    if not candidates:
-        die("No devcontainer stacks found.")
-
-    matches = [cid for cid in candidates if _workspace_mount_source(cid) == target]
-    if not matches:
+    pairs = _project_workdirs(f"label=devcontainer.workspace={target}")
+    if not pairs:
         die(f"No containers mounted from {target}.")
+    _teardown(pairs)
 
-    _teardown_containers(matches)
 
-
-# ---------------------------------------------------------------------------
-# `stop --all` subcommand — tear down every devcontainer stack (scoped to
-# /workspace mounts so it never touches unrelated docker-compose projects
-# on the host).
-# ---------------------------------------------------------------------------
 def cmd_stop_all():
+    """`stop --all` — tear down every devcontainer stack, from any directory."""
     print("🔍 Looking for all devcontainer stacks ...")
-    matches = _all_workspace_containers()
-    if not matches:
+    pairs = _project_workdirs("label=devcontainer.env")
+    if not pairs:
         die("No devcontainer stacks found.")
-    _teardown_containers(matches)
+    _teardown(pairs)
 
 
 # ---------------------------------------------------------------------------
-# `list` subcommand — show every devcontainer stack (project, service,
-# status, mounted workspace) regardless of which directory it was started
-# from.
+# Plain stop/start of a whole stack — every container in the compose project,
+# nothing removed. `docker stop`/`start` on the containers directly rather than
+# `docker compose stop/start`, which would need the exact COMPOSE_FILE/env the
+# stack was created with. Backs the Stacks pane's 's' toggle.
 # ---------------------------------------------------------------------------
+def _stop_or_start(project, action):
+    """Main container(s) are stopped before the proxy (nothing left running without its
+    egress path) and started after it (common/entrypoint.sh resolves `proxy` at start and
+    refuses to come up without it). Returns True on success."""
+    proxies, others = [], []
+    for cid, svc in ps_rows(f"label=com.docker.compose.project={project}", fields=[ID, SERVICE]):
+        (proxies if svc == "proxy" else others).append(cid)
+    order = (others, proxies) if action == "stop" else (proxies, others)
+    results = [subprocess.run(["docker", action, *group], capture_output=True).returncode == 0 for group in order if group]
+    return bool(results) and all(results)
+
+
+def stop_stack(project):
+    return _stop_or_start(project, "stop")
+
+
+def start_stack(project):
+    return _stop_or_start(project, "start")
+
+
 def cmd_list():
-    matches = _all_workspace_containers()
-    if not matches:
+    """`list` — every devcontainer stack, regardless of where it was started from."""
+    rows = sorted(set(ps_rows("label=devcontainer.env", fields=[PROJECT, ENV, SERVICE, STATE, WORKSPACE])))
+    if not rows:
         print("No devcontainer stacks found.")
         return
-
     print(f"{'PROJECT':<16} {'ENV':<24} {'SERVICE':<10} {'STATUS':<10} WORKSPACE")
-    fmt = (
-        '{{index .Config.Labels "com.docker.compose.project"}}|'
-        '{{index .Config.Labels "devcontainer.env"}}|'
-        '{{index .Config.Labels "com.docker.compose.service"}}|'
-        '{{.State.Status}}|'
-        '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}'
-    )
-    rows = set()
-    for cid in matches:
-        info = docker_out("inspect", cid, "--format", fmt)
-        if info:
-            rows.add(info)
-
-    for info in sorted(rows):
-        proj, env, svc, status, src = info.split("|", 4)
+    for proj, env, svc, status, src in rows:
         print(f"{proj:<16} {env:<24} {svc:<10} {status:<10} {src}")
 
 
-# ---------------------------------------------------------------------------
-# `logs` subcommand — tail (or one-shot view) the whitelist proxy's access
-# log for the stack mounted from the given directory (default: cwd).
-# ---------------------------------------------------------------------------
 def cmd_logs(target, follow):
+    """`logs` — tail (or one-shot view) the proxy's access log for the stack mounted from
+    `target`. No -t on exec: tail needs no TTY, so this also works piped/scripted."""
     project, env, _workspace = resolve_stack(target)
-
     proxy_cid = proxy_cid_for_project(project)
     if not proxy_cid:
         die(f"No 'proxy' container found for stack '{project}' ({env}).")
     if not is_running(proxy_cid):
         die(f"Proxy for '{env}' (project {project}) isn't running — './run.py' (Stacks tab, 'a') to start it.")
 
-    # No -t: tail doesn't need a TTY, and this way `logs` also works when
-    # run.py's own stdin/stdout aren't a terminal (e.g. piped/scripted).
     if follow:
         print(f"📜 Tailing access log for '{env}' (project {project}) — Ctrl-C to stop ...")
-        subprocess.run(["docker", "exec", "-i", proxy_cid, "tail", "-n", "50", "-f", "/var/log/squid/access.log"])
     else:
         print(f"📜 Access log for '{env}' (project {project}):")
-        subprocess.run(["docker", "exec", "-i", proxy_cid, "tail", "-n", "50", "/var/log/squid/access.log"])
+    tail = ["tail", "-n", "50"] + (["-f"] if follow else [])
+    subprocess.run(["docker", "exec", "-i", proxy_cid, *tail, "/var/log/squid/access.log"])
 
 
 # ---------------------------------------------------------------------------
-# proxy.env / GITHUB_TOKEN — folded into the environment handed to every
-# docker/docker-compose subprocess call from here on, rather than one shell
-# `export` (Python has no process-wide equivalent; subprocess.run's own
-# `env=` is the only place it applies).
+# Environment for every docker/compose subprocess: proxy.env + GITHUB_TOKEN.
 # ---------------------------------------------------------------------------
 def _load_proxy_env():
     env = {}
@@ -203,22 +154,19 @@ def _load_proxy_env():
     if proxy_env_file.exists():
         for line in proxy_env_file.read_text().splitlines():
             line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            env[key.strip()] = value.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                env[key.strip()] = value.strip()
     return env
 
 
 def build_env():
-    """The environment every docker/docker-compose subprocess call needs: the current
-    process environment, plus proxy.env's HTTP_PROXY/HTTPS_PROXY/NO_PROXY (both cases) if
-    present, plus GITHUB_TOKEN (falling back to GH_TOKEN, always present even if empty so
-    compose's `secrets.environment` lookup never fails on an unset var). Raises the
+    """The current process environment, plus proxy.env's HTTP_PROXY/HTTPS_PROXY/NO_PROXY
+    (both cases) if present, plus GITHUB_TOKEN (falling back to GH_TOKEN, always present even
+    if empty so compose's `secrets.environment` lookup never fails on an unset var). Raises the
     unauthenticated api.github.com rate limit (60 req/hr per IP) used when resolving "latest"
     tool versions; passed to builds as a BuildKit secret, never baked into image layers."""
-    env = os.environ.copy()
-    env.update(_load_proxy_env())
+    env = {**os.environ, **_load_proxy_env()}
     env["GITHUB_TOKEN"] = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
     return env
 
@@ -232,31 +180,26 @@ def build_env():
 # (`docker compose build`, VS Code "Reopen in Container") needs the base to
 # exist already: run `./run.py` once first.
 # ---------------------------------------------------------------------------
+def _rust_version():
+    return os.environ.get("RUST_VERSION", "stable")
+
+
 def _hash_base_inputs():
-    paths = []
-    for rel in ("common/Dockerfile", "common/entrypoint.sh"):
-        p = REPO_ROOT / rel
-        if p.is_file():
-            paths.append(p)
+    paths = [REPO_ROOT / rel for rel in ("common/Dockerfile", "common/entrypoint.sh") if (REPO_ROOT / rel).is_file()]
     for rel in ("common/lib", "common/scripts"):
         d = REPO_ROOT / rel
         if d.is_dir():
             paths.extend(f for f in d.rglob("*") if f.is_file())
     paths.sort(key=lambda p: str(p.relative_to(REPO_ROOT)))
 
-    lines = []
-    for p in paths:
-        digest = hashlib.sha256(p.read_bytes()).hexdigest()
-        lines.append(f"{digest}  {p.relative_to(REPO_ROOT)}\n")
-    lines.append(f"RUST_VERSION={os.environ.get('RUST_VERSION', 'stable')}\n")
-
+    lines = [f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(REPO_ROOT)}\n" for p in paths]
+    lines.append(f"RUST_VERSION={_rust_version()}\n")
     return hashlib.sha256("".join(lines).encode()).hexdigest()[:16]
 
 
 def ensure_base_image(rebuild, debug, env):
     hash_ = _hash_base_inputs()
     have = docker_out("image", "inspect", BASE_IMAGE, "--format", '{{index .Config.Labels "toolbelt.base-hash"}}')
-
     if not rebuild and have == hash_:
         return
 
@@ -274,7 +217,7 @@ def ensure_base_image(rebuild, debug, env):
         "-f", str(REPO_ROOT / "common" / "Dockerfile"),
         "-t", BASE_IMAGE,
         "--label", f"toolbelt.base-hash={hash_}",
-        "--build-arg", f"RUST_VERSION={os.environ.get('RUST_VERSION', 'stable')}",
+        "--build-arg", f"RUST_VERSION={_rust_version()}",
     ]
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"):
         cmd += ["--build-arg", name]
@@ -285,114 +228,86 @@ def ensure_base_image(rebuild, debug, env):
 
 
 # ---------------------------------------------------------------------------
-# Discover toolbelt directories: every immediate subdirectory of the repo
-# root containing docker-compose.yml/.yaml. base-toolbelt always sorts
-# first, everything else alphabetically after. Public — devtool/proxy.py's
-# Stacks tab also uses this to list toolbelts that haven't been started yet.
+# Discovery: every immediate subdirectory of the repo root with a
+# docker-compose.yml/.yaml; base-toolbelt sorts first.
 # ---------------------------------------------------------------------------
 def discover_env_dirs():
-    dirs = []
-    for child in REPO_ROOT.iterdir():
-        if not child.is_dir():
-            continue
-        if (child / "docker-compose.yml").is_file() or (child / "docker-compose.yaml").is_file():
-            dirs.append(child)
-    dirs.sort(key=lambda d: (0 if d.name == "base-toolbelt" else 1, d.name))
-    return dirs
+    dirs = sorted(
+        child for child in REPO_ROOT.iterdir()
+        if child.is_dir() and ((child / "docker-compose.yml").is_file() or (child / "docker-compose.yaml").is_file())
+    )
+    return sorted(dirs, key=lambda d: d.name != "base-toolbelt")
 
 
-def _random_project_name():
-    return "dev-" + os.urandom(4).hex()
+# ---------------------------------------------------------------------------
+# Building/starting a stack.
+# ---------------------------------------------------------------------------
+def _compose_runner(compose_dir, project, compose_files, **extra_env):
+    """(env, compose) — the env every call for this stack needs, and a `docker compose`
+    runner bound to it (cwd = the env folder, so relative paths resolve as AGENTS.md
+    describes)."""
+    env = build_env()
+    env.update(extra_env)
+    env["COMPOSE_PROJECT_NAME"] = project
+    env["COMPOSE_FILE"] = ":".join(["docker-compose.yml", *map(str, compose_files)])
+
+    def compose(*args, **kw):
+        return subprocess.run(["docker", "compose", *args], cwd=compose_dir, env=env, **kw)
+
+    return env, compose
+
+
+def _rebuild_no_cache(compose, debug):
+    """-r: tear down first so --no-cache is never skipped. Returns True on success."""
+    print("🔨 Rebuilding from scratch (no cache) ...")
+    compose("down")
+    progress = ["--progress=plain"] if debug else []
+    return compose("build", "--no-cache", *progress).returncode == 0
 
 
 def start_and_open_shell(compose_dir, volume, rebuild, debug):
     """Builds (if needed)/starts the stack for `compose_dir` mounted from `volume`, then opens
-    a shell in it — or reconnects straight to a shell if it's already running. Shared by the
-    non-interactive picker above and devtool/proxy.py's Stacks tab 'o' action, which calls this
-    after tearing curses down (a real interactive zsh session can't run inside the curses
-    alternate screen)."""
-    zshrc = REPO_ROOT / "common" / ".zshrc"
-    if not zshrc.is_file():
+    a shell in it — or reconnects straight to a shell if it's already running. Called by the
+    Stacks tab's 'o'/'n' after tearing curses down (a real interactive zsh session can't run
+    inside the curses alternate screen)."""
+    if not (REPO_ROOT / "common" / ".zshrc").is_file():
         die("common/.zshrc not found — run './run.py setup' first.")
 
     print(f"📂 Working in: {compose_dir}")
     print(f"📁 Mounting volume: {volume}")
 
-    # ---------------------------------------------------------------------
-    # Project name: random (`dev-<8 hex>`). Nothing is encoded in it — a
-    # stack is identified by its labels instead: `devcontainer.env` (which
-    # toolbelt) and `devcontainer.workspace` (the absolute host directory),
-    # both set in the compose files. If a stack for this env + directory
-    # already exists we reuse its project name to reconnect; otherwise mint
-    # a new one.
-    # ---------------------------------------------------------------------
+    # Project name: random (`dev-<8 hex>`), encodes nothing — a stack is identified by its
+    # `devcontainer.env` + `devcontainer.workspace` labels. Reuse the project of an existing
+    # stack for this env + directory to reconnect; otherwise mint a new one.
     env_name = compose_dir.name
-    existing = docker_out(
-        "ps", "-a", "-q",
-        "--filter", f"label=devcontainer.env={env_name}",
-        "--filter", f"label=devcontainer.workspace={volume}",
-    ).split()
+    existing = ps_rows(f"label=devcontainer.env={env_name}", f"label=devcontainer.workspace={volume}", fields=[PROJECT])
+    project = (existing[0][0] if existing else "") or "dev-" + os.urandom(4).hex()
 
-    project = ""
-    if existing:
-        project = docker_out("inspect", existing[0], "--format", '{{index .Config.Labels "com.docker.compose.project"}}')
-    if not project:
-        project = _random_project_name()
-
-    env = build_env()
-    env["VOLUME"] = volume
-    env["COMPOSE_PROJECT_NAME"] = project
-    # Name the container after the project (see the override file for why this is launcher-only).
-    env["COMPOSE_FILE"] = ":".join([
-        "docker-compose.yml",
-        str(REPO_ROOT / "common" / "proxy.docker-compose.yml"),
-        str(REPO_ROOT / "common" / "container-name.docker-compose.yml"),
-    ])
-
-    def compose(*args, **kw):
-        return subprocess.run(["docker", "compose", *args], cwd=compose_dir, env=env, **kw)
-
+    # container-name override: names the container after the project (launcher-only).
+    env, compose = _compose_runner(compose_dir, project, [PROXY_COMPOSE, CONTAINER_NAME_COMPOSE], VOLUME=volume)
     ensure_base_image(rebuild, debug, env)
 
-    # ---------------------------------------------------------------------
-    # Force rebuild — tears down first so --no-cache is never skipped.
-    # ---------------------------------------------------------------------
-    if rebuild:
-        print("🔨 Rebuilding from scratch (no cache) ...")
-        compose("down")
-        progress = ["--progress=plain"] if debug else []
-        if compose("build", "--no-cache", *progress).returncode != 0:
-            die("Failed to build stack.")
+    if rebuild and not _rebuild_no_cache(compose, debug):
+        die("Failed to build stack.")
 
-    # ---------------------------------------------------------------------
-    # Start stack — reuse the existing container if it's already running.
-    # ---------------------------------------------------------------------
-    running = compose("ps", "--status", "running", "-q", capture_output=True, text=True).stdout.strip()
-    if running:
+    if compose("ps", "--status", "running", "-q", capture_output=True, text=True).stdout.strip():
         print("♻️  Stack already running — connecting to the existing container.")
     else:
         if env_name == "java-toolbelt":
             print("☕ Java major version:", file=sys.stderr)
             print("  [1] 8\n  [2] 11\n  [3] 17\n  [4] 21\n  [5] 25", file=sys.stderr)
             print("Select [ENTER for latest LTS]: ", end="", flush=True)
-            jv = input()
-            versions = {"1": "8", "2": "11", "3": "17", "4": "21", "5": "25"}
-            if jv in versions:
-                env["JAVA_VERSION"] = versions[jv]
-
-        up_args = [] if rebuild else ["--build"]
-        if compose("up", "-d", *up_args).returncode != 0:
+            jv = {"1": "8", "2": "11", "3": "17", "4": "21", "5": "25"}.get(input())
+            if jv:
+                env["JAVA_VERSION"] = jv
+        if compose("up", "-d", *([] if rebuild else ["--build"])).returncode != 0:
             die("Failed to start stack.")
 
     print("ℹ️  The stack keeps running after you exit the shell — it is not stopped or deleted automatically.")
     print("   Run './run.py stop' (or 'dev stop') to stop & delete it.")
 
-    # ---------------------------------------------------------------------
-    # Select service — `proxy` (from common/proxy.docker-compose.yml) is
-    # infrastructure, not a shell target: exclude it so environments with a
-    # single `dev` service still auto-select it, same as before the proxy
-    # was merged in.
-    # ---------------------------------------------------------------------
+    # `proxy` (from common/proxy.docker-compose.yml) is infrastructure, not a shell target —
+    # excluded so environments with a single `dev` service still auto-select it.
     services_result = compose("config", "--services", capture_output=True, text=True)
     if services_result.returncode != 0:
         die("Failed to list services.")
@@ -409,8 +324,7 @@ def start_and_open_shell(compose_dir, volume, rebuild, debug):
             print("⏭️  Skipping shell. Stack is running — press Ctrl-C to stop.")
 
             def _cleanup(_signum, _frame):
-                print()
-                print("🛑 Stopping stack …")
+                print("\n🛑 Stopping stack …")
                 compose("down", "-v")
                 sys.exit(0)
 
@@ -423,18 +337,13 @@ def start_and_open_shell(compose_dir, volume, rebuild, debug):
         except (ValueError, IndexError):
             die(f"Invalid selection: {svc_choice}")
 
-    # ---------------------------------------------------------------------
-    # Open shell. -u ubuntu: the container's default user is root
-    # (base.docker-compose.yml's entrypoint needs root briefly to set up the
-    # egress iptables rules before dropping privileges itself) — without
-    # this, exec would land as root too.
-    # ---------------------------------------------------------------------
+    # -u ubuntu: the container's default user is root (the entrypoint needs it briefly for the
+    # egress iptables rules before dropping privileges itself) — exec would land as root too.
     print(f"🚀 Opening zsh in service '{service}' …")
     result = compose("exec", "-ti", "-u", "ubuntu", service, "zsh")
     if result.returncode != 0:
         return result.returncode
 
-    print()
-    print("👋 Shell exited — the stack is still running.")
+    print("\n👋 Shell exited — the stack is still running.")
     print("   Run './run.py stop' (or 'dev stop') to stop & delete it.")
     return 0
