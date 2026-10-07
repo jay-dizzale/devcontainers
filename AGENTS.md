@@ -289,19 +289,12 @@ explicitly allowed, and every request (allowed or denied) is logged.
     and corrupts the display (confirmed: this is exactly what happened before the output was
     captured in `launcher._teardown`).
   - **Right pane — Proxy settings** (always visible, 3/5 width), its own sub-tab bar:
-    - **Domain Statistics**: one row per domain seen in `access.log` for the *active* stack
-      (hit count, live ALLOWED/BLOCKED, "Xs ago"). `↑`/`↓` selects a row, `a` allows it if
-      BLOCKED, `b` blocks it if ALLOWED. STATUS is checked against the *live* merged whitelist
-      (exact match or a leading-dot wildcard as a suffix match), not the log's last-recorded
-      verdict — tested: using the log's own verdict means pressing `a`/`b` doesn't visibly
-      change a row until a fresh request re-proves it, which looks like the action silently did
-      nothing. `a` here always writes to the gitignored `whitelist.d/local.txt`
-      (`do_allow_domain`), never a tracked file — see the Global/Custom Whitelist split below.
     - **Ports**: read-only, and scoped to a single stack rather than listing every stack —
       whichever one is currently selected in the Stacks pane (`self.idx[TAB_STACKS]`, read
       regardless of which pane has focus, so picking a card on the left and then switching to
       this tab shows that card's ports). One row per *published* mapping, not one row per
-      stack: `HOST PORT` / `CONTAINER PORT` / `BIND ADDRESS` (`_published_ports` parses
+      stack: `HOST PORT → CONTAINER PORT` (an arrow between the two so each row reads as the
+      actual mapping direction) then `BIND ADDRESS` (`_published_ports` parses
       `docker ps`'s `.Ports` into this shape, keeping the bind address rather than discarding
       it — `_format_bind` annotates `127.0.0.1`/`::1` as "(localhost)" and `0.0.0.0`/`::` as
       "(all interfaces)", since that distinction is exactly what decides whether the port is
@@ -310,6 +303,14 @@ explicitly allowed, and every request (allowed or denied) is logged.
       rows rather than being deduplicated. Only known while the stack's `dev` container is
       running (docker picks each host port from the env's compose range at start), so a
       stopped stack's rows read "(none — stack isn't running)".
+    - **Domain Statistics**: one row per domain seen in `access.log` for the *active* stack
+      (hit count, live ALLOWED/BLOCKED, "Xs ago"). `↑`/`↓` selects a row, `a` allows it if
+      BLOCKED, `b` blocks it if ALLOWED. STATUS is checked against the *live* merged whitelist
+      (exact match or a leading-dot wildcard as a suffix match), not the log's last-recorded
+      verdict — tested: using the log's own verdict means pressing `a`/`b` doesn't visibly
+      change a row until a fresh request re-proves it, which looks like the action silently did
+      nothing. `a` here always writes to the gitignored `whitelist.d/local.txt`
+      (`do_allow_domain`), never a tracked file — see the Global/Custom Whitelist split below.
     - **Global Whitelist**: every domain configured across the **tracked**
       `whitelist.d/*.txt` files only (`00-common.txt` + per-env `*-toolbelt.txt`;
       `read_global_whitelist_entries`) — not local.txt, which gets its own tab. Drawn as two

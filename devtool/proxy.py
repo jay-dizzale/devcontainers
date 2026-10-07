@@ -1,6 +1,6 @@
 """devtool/proxy.py — the two-pane curses app that bare `run.py` launches: Stacks on the left
 (2/5 width — every devcontainer stack on the host, not just the current directory's),
-proxy settings on the right (3/5 width — Domain Statistics/Global Whitelist/Custom
+proxy settings on the right (3/5 width — Ports/Domain Statistics/Global Whitelist/Custom
 Whitelist/Access log sub-tabs). 'o'/'n' tear the TUI down first, since a
 real interactive zsh session can't run inside curses' alternate screen; the program ends
 when that shell exits.
@@ -349,8 +349,8 @@ TAB_STACKS, TAB_DOMAINS, TAB_PORTS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG = range(6
 # *-toolbelt.txt); TAB_CUSTOM ("Custom Whitelist") shows/edits only the gitignored local.txt
 # — see read_global_whitelist_entries/read_custom_whitelist_entries and
 # do_allow_domain/do_allow_domain_global.
-PROXY_TABS = [TAB_DOMAINS, TAB_PORTS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG]
-PROXY_TAB_TITLES = [" 1:Domain Stats ", " 2:Ports ", " 3:Global WL ", " 4:Custom WL ", " 5:Access log "]
+PROXY_TABS = [TAB_PORTS, TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG]
+PROXY_TAB_TITLES = [" 1:Ports ", " 2:Domain Stats ", " 3:Global WL ", " 4:Custom WL ", " 5:Access log "]
 
 
 @contextlib.contextmanager
@@ -401,7 +401,7 @@ def _draw_box(stdscr, y0, x0, box_h, box_w, title):
 
 class OverviewApp:
     """The interactive curses app bare `run.py` opens: a permanent two-pane split — Stacks
-    always visible on the left 2/5, the proxy settings (Domain Statistics/Ports/Global
+    always visible on the left 2/5, the proxy settings (Ports/Domain Statistics/Global
     Whitelist/Custom Whitelist/Access log, switchable via their own sub-tab bar) on the
     right 3/5. Exactly one pane has input focus at a time (self.focus); Tab/←/→ moves focus."""
 
@@ -412,7 +412,7 @@ class OverviewApp:
         self.workspace = workspace
         self.target_dir = target_dir  # fixed: where 'n' (new stack) builds/starts into
         self.focus = "stacks"         # "stacks" (left pane) or "proxy" (right pane)
-        self.proxy_tab = TAB_DOMAINS  # which sub-tab the right pane currently shows
+        self.proxy_tab = TAB_PORTS    # which sub-tab the right pane currently shows
         self.idx = [0, 0, 0, 0, 0, 0]  # selected row, per tab (log tab unused — it scrolls)
         self.scroll = [0, 0, 0, 0, 0]  # stacks/domains/ports/whitelist/custom: first visible row (viewport top)
         self.log_offset = 0           # log tab: 0 = pinned to newest ("following")
@@ -429,7 +429,7 @@ class OverviewApp:
         return TAB_STACKS if self.focus == "stacks" else self.proxy_tab
 
     def _pane_pos(self):
-        """Linear position along Stacks(0) → Domain Stats(1) → Ports(2) → Global WL(3) →
+        """Linear position along Stacks(0) → Ports(1) → Domain Stats(2) → Global WL(3) →
         Custom WL(4) → Access log(5), so ←/→ can walk through all six one step at a time —
         all the way right into the last sub-tab, then back out to Stacks by going left —
         instead of only toggling between the two panes."""
@@ -717,7 +717,11 @@ class OverviewApp:
             return
         header = f"{s['project']}  ·  {s['env']}  ·  {s['container_state'].upper()}"
         _safe_addnstr(stdscr, top, x0 + 2, header, max(0, w - 2), curses.color_pair(3) | curses.A_BOLD)
-        _safe_addnstr(stdscr, top + 2, x0 + 2, f"{'HOST PORT':<11} {'CONTAINER PORT':<16} BIND ADDRESS", max(0, w - 2), curses.color_pair(3) | curses.A_UNDERLINE)
+        # The arrow sits between HOST PORT and CONTAINER PORT so each row reads as the actual
+        # mapping direction ("3010 → 3000") rather than two unrelated-looking columns — " → "
+        # (space-arrow-space) is exactly as wide as the header's matching gap, so columns stay
+        # aligned.
+        _safe_addnstr(stdscr, top + 2, x0 + 2, f"{'HOST PORT':<11}   {'CONTAINER PORT':<16} BIND ADDRESS", max(0, w - 2), curses.color_pair(3) | curses.A_UNDERLINE)
 
         ports = s["ports"]
         if not ports:
@@ -728,7 +732,7 @@ class OverviewApp:
         visible = max(0, height - 4)
         for row_i, p in enumerate(ports[:visible]):
             y = top + 3 + row_i
-            text = f"{p['host_port']:<11} {p['container_port']:<16} {_format_bind(p['bind'])}"
+            text = f"{p['host_port']:<11} → {p['container_port']:<16} {_format_bind(p['bind'])}"
             _safe_addnstr(stdscr, y, x0 + 2, text, max(0, w - 2), curses.A_BOLD)
         if len(ports) > visible:
             _safe_addnstr(stdscr, top + 3 + visible, x0 + 2, f"… {len(ports) - visible} more", max(0, w - 2), curses.color_pair(3) | curses.A_DIM)
