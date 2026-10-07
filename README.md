@@ -30,7 +30,22 @@ Ruby, Rust, Go, and Python/`uv`, and adds its own tools on top:
 > `run.py` when it builds the shared base image. Not every tool has that arg wired through yet —
 > check the env's `docker-compose.yml` before assuming one is reachable.
 > The launcher lists `base-toolbelt` first, in its own category, followed by
-> the other five toolbelts alphabetically.
+> the other toolbelts alphabetically.
+
+## Services
+
+Besides the toolbelts, `run.py` can start long-running **services**, listed under their
+own "Services" heading in the `n` (new stack) modal. A service is not a devcontainer:
+no workspace is mounted and no shell is opened — it just runs, behind the same egress
+proxy, and its card in the Stacks pane shows the URL to open.
+
+| Service | What it is |
+|---------|------------|
+| `open-webui-service` | [Open WebUI](https://github.com/open-webui/open-webui) on `http://localhost:3080` (override with `OPEN_WEBUI_PORT`), preconfigured for **Ollama on your host** (`host.docker.internal:11434`) and Ollama embeddings (`nomic-embed-text`) for RAG. Data is kept in the `open-webui-data` Docker volume, which `stop`/`d` never deletes. |
+
+Before first use, pull the models on the host: `ollama pull nomic-embed-text` plus a chat
+model (e.g. `ollama pull llama3.2`). On a Linux host, Ollama must listen beyond loopback
+(`OLLAMA_HOST=0.0.0.0`); Docker Desktop on macOS/Windows works with the default.
 
 ## The common base
 

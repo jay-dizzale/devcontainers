@@ -1,0 +1,12 @@
+# open-webui-service
+
+# Ollama on the Docker host. squid.conf only lets host.docker.internal
+# through on port 11434 (plain HTTP), so this doesn't open any other host
+# service. Note: whitelist.d/ is merged for every stack, so every
+# environment can reach host Ollama once this file exists.
+host.docker.internal
+
+# Python packaging — Open WebUI installs extra packages at runtime (e.g.
+# requirements of user-added Tools/Functions)
+pypi.org
+files.pythonhosted.org

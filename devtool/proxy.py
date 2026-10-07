@@ -1,7 +1,7 @@
 """devtool/proxy.py — the two-pane curses app that bare `run.py` launches: Stacks on the left
-(1/3 width — every devcontainer stack on the host, not just the current directory's),
-proxy settings on the right (2/3 width — Domain Statistics/Global Whitelist/Custom
-Whitelist/Access log sub-tabs). 'o'/'n' tear the TUI down first, since a
+(1/3 width — every devcontainer stack and service on the host, not just the current
+directory's), proxy settings on the right (2/3 width — Domain Statistics/Global Whitelist/
+Custom Whitelist/Access log sub-tabs). 'o'/'n' on a toolbelt tear the TUI down first, since a
 real interactive zsh session can't run inside curses' alternate screen, then come back to it.
 Non-tty: a one-shot Domain Statistics snapshot; `-f`: a passive 2s-redraw loop.
 
@@ -14,13 +14,14 @@ proxy and domain whitelist" section for the full architecture.
 import contextlib
 import curses
 import io
+import re
 import sys
 import time
 from pathlib import Path
 
 from . import launcher
 from .docker_utils import (
-    CONFIG_FILES, ENV, ID, PROJECT, REPO_ROOT, STATE, WORKDIR, WORKSPACE,
+    CONFIG_FILES, ENV, ID, KIND, PORTS, PROJECT, REPO_ROOT, STATE, WORKDIR, WORKSPACE,
     die, docker, docker_engine_version, docker_out, proxy_cid_for_project, ps_rows, resolve_stack,
 )
 
@@ -41,11 +42,15 @@ def list_all_stacks():
     shell in any of them (`o`), and start/stop any stack's proxy — all without first `cd`-ing
     into its workspace. Starting a brand-new environment is a separate action (`n`, see
     OverviewApp._new_stack), not a row here — this only ever lists what already exists."""
-    # Two bulk `docker ps --format` calls total, however many stacks exist.
+    # Two bulk `docker ps --format` calls total, however many stacks exist. A service
+    # (`devcontainer.kind=service`, see launcher.discover_service_dirs) has no workspace; its
+    # card shows the published URL instead (parsed from `.Ports`, "127.0.0.1:3080->8080/tcp").
     seen = {}
-    for project, env, workspace, state in ps_rows("label=devcontainer.env", fields=[PROJECT, ENV, WORKSPACE, STATE]):
+    for project, env, workspace, kind, state, ports in ps_rows("label=devcontainer.env", fields=[PROJECT, ENV, WORKSPACE, KIND, STATE, PORTS]):
         if project:
-            seen[project] = (env, workspace, state)
+            m = re.search(r":(\d+)->8080/tcp", ports)
+            url = f"http://localhost:{m.group(1)}" if (m and state == "running") else None
+            seen[project] = (env, workspace, kind or "toolbelt", url, state)
 
     proxy_by_project = {
         project: (cid, state == "running")
@@ -54,15 +59,18 @@ def list_all_stacks():
     }
 
     stacks = []
-    for project, (env, workspace, state) in sorted(seen.items()):
+    stacks = []
+    for project, (env, workspace, kind, url, state) in sorted(seen.items()):
         proxy_cid, running = proxy_by_project.get(project, (None, False))
         stacks.append({
             "project": project,
             "env": env,
             "workspace": workspace,
+            "kind": kind,
+            "url": url,
             "proxy_cid": proxy_cid,
             "status": "RUNNING" if running else "STOPPED",  # the proxy's state
-            # The stack's own `dev` container: docker's state word
+            # The stack's own container (`dev`, or the service's): docker's state word
             # (running/exited/created/paused/restarting) — the card's border color and label.
             "container_state": state or "unknown",
         })
@@ -494,7 +502,7 @@ class OverviewApp:
         common = "←/→ move · Tab jump pane · q quit"
         tab = self.current_tab()
         if tab == TAB_STACKS:
-            return f"↑/↓ select · o open shell · n new stack · Enter switch/new · s start/stop stack · a start proxy · b stop proxy · d delete stack · {common}"
+            return f"↑/↓ select · o open shell (service: start) · n new stack · Enter switch/new · s start/stop stack · a start proxy · b stop proxy · d delete stack · {common}"
         sub = "1/2/3/4 sub-tab · "
         if tab == TAB_DOMAINS:
             return f"↑/↓ select · a allow (→ local.txt) · b block · {sub}{common}"
@@ -529,7 +537,7 @@ class OverviewApp:
         self.scroll[tab] = scroll
         return scroll, visible
 
-    # bordered card: top border, ID title (+ proxy state), id, FOLDER title, value, bottom border
+    # bordered card: top border, ID title (+ proxy state), id, FOLDER/URL title, value, bottom border
     _STACK_ENTRY_LINES = 6
 
     # Light box-drawing for normal cards, heavy for the selected one — selection can't be a
@@ -607,7 +615,7 @@ class OverviewApp:
             is_active = s["project"] and s["project"] == self.project
             running = s["status"] == "RUNNING"
             # Labeled fields: a title line (cyan, bold) with its value on the line below (bold,
-            # not dimmed) — ID, then FOLDER. Content attrs never change
+            # not dimmed) — ID, then FOLDER (or URL for a service). Content attrs never change
             # with selection — only the border (above) does, so the highlight reads as "this
             # card" rather than painting the text too.
             title_attr = curses.color_pair(3) | curses.A_BOLD
@@ -623,8 +631,15 @@ class OverviewApp:
             _safe_addnstr(stdscr, y + 1, status_x, status_text, max(0, x0 + card_w - status_x), status_attr)
             _safe_addnstr(stdscr, y + 2, x0 + 5, s["project"], inner_w, value_attr)
 
-            _safe_addnstr(stdscr, y + 3, x0 + 5, "FOLDER", inner_w, title_attr)
-            _safe_addnstr(stdscr, y + 4, x0 + 5, self._tail(s["workspace"], inner_w), inner_w, value_attr)
+            if s["kind"] == "service":
+                _safe_addnstr(stdscr, y + 3, x0 + 5, "URL", inner_w, title_attr)
+                if s["url"]:
+                    _safe_addnstr(stdscr, y + 4, x0 + 5, s["url"], inner_w, curses.color_pair(1) | curses.A_BOLD)
+                else:
+                    _safe_addnstr(stdscr, y + 4, x0 + 5, "not running", inner_w, curses.A_DIM)
+            else:
+                _safe_addnstr(stdscr, y + 3, x0 + 5, "FOLDER", inner_w, title_attr)
+                _safe_addnstr(stdscr, y + 4, x0 + 5, self._tail(s["workspace"], inner_w), inner_w, value_attr)
 
     @staticmethod
     def _tail(text, width):
@@ -826,7 +841,8 @@ class OverviewApp:
         s = self._selected_stack()
         if not s:
             return None
-        self.pending_action = ("open_shell", s)
+        # A service has no shell to open — 'o' (re)starts it if needed and shows its URL.
+        self.pending_action = ("open_service" if s["kind"] == "service" else "open_shell", s)
         return False
 
     def _new_stack(self, stdscr):
@@ -847,13 +863,24 @@ class OverviewApp:
         """Runs its own small blocking event loop — like _prompt_new_domain — rather than
         wiring into draw()/handle_key(), since it's a one-shot modal that owns input until
         confirmed or cancelled. Returns
-        {"compose_dir": Path, "folder": str} or None (Esc)."""
+        {"kind": "toolbelt"|"service", "compose_dir": Path, "folder": str} or None (Esc).
+        Toolbelts and services are listed under their own headings; the folder field only
+        applies to toolbelts (a service has no workspace)."""
         env_dirs = launcher.discover_env_dirs()
-        if not env_dirs:
+        service_dirs = launcher.discover_service_dirs()
+        if not env_dirs and not service_dirs:
             self.message = "⚠️  No docker-compose files found — nothing to pick from."
             return None
 
-        names = [d.name for d in env_dirs]
+        # Display lines: ("header", title) or (kind, Path). `choices` indexes only the
+        # selectable (non-header) lines, so ↑/↓ skip the headings.
+        lines = []
+        for title, kind, dirs in (("Toolbelts", "toolbelt", env_dirs), ("Services", "service", service_dirs)):
+            if dirs:
+                lines.append(("header", title))
+                lines.extend((kind, d) for d in dirs)
+        choices = [i for i, (kind, _) in enumerate(lines) if kind != "header"]
+        names = [d.name for kind, d in lines if kind != "header"]
         idx = names.index(self.env) if self.env in names else 0
         folder = self.target_dir
         focus = "type"
@@ -861,21 +888,23 @@ class OverviewApp:
         stdscr.timeout(100)
         try:
             while True:
-                self._draw_new_stack_modal(stdscr, names, idx, folder, focus)
+                kind, compose_dir = lines[choices[idx]]
+                self._draw_new_stack_modal(stdscr, lines, choices[idx], folder, focus)
                 key = _read_key(stdscr)
                 if key == -1:
                     continue
                 if key == 27:
                     return None
                 if key == 9:  # Tab — switch between the type list and the folder field
-                    focus = "folder" if focus == "type" else "type"
+                    if kind != "service":  # no folder for a service — stay on the list
+                        focus = "folder" if focus == "type" else "type"
                 elif key in (10, 13, curses.KEY_ENTER):
-                    return {"compose_dir": env_dirs[idx], "folder": folder.strip() or self.target_dir}
+                    return {"kind": kind, "compose_dir": compose_dir, "folder": folder.strip() or self.target_dir}
                 elif focus == "type":
                     if key == curses.KEY_UP:
-                        idx = (idx - 1) % len(names)
+                        idx = (idx - 1) % len(choices)
                     elif key == curses.KEY_DOWN:
-                        idx = (idx + 1) % len(names)
+                        idx = (idx + 1) % len(choices)
                 else:
                     if key in (curses.KEY_BACKSPACE, 127, 8):
                         folder = folder[:-1]
@@ -885,11 +914,12 @@ class OverviewApp:
             curses.curs_set(0)
             stdscr.timeout(200)
 
-    def _draw_new_stack_modal(self, stdscr, names, idx, folder, focus):
+    def _draw_new_stack_modal(self, stdscr, lines, sel_line, folder, focus):
         h, w = stdscr.getmaxyx()
         box_w = max(40, min(64, w - 4))
         inner_w = box_w - 4
-        n_visible = max(1, min(len(names), h - 10))
+        n_visible = max(1, min(len(lines), h - 10))
+        is_service = lines[sel_line][0] == "service"
         box_h = min(7 + n_visible, h - 2)
         y0 = max(0, (h - box_h) // 2)
         x0 = max(0, (w - box_w) // 2)
@@ -898,22 +928,28 @@ class OverviewApp:
 
         list_top = y0 + 2
         # Keep the selection in view when the list is taller than the box.
-        first = max(0, min(idx - n_visible + 1, len(names) - n_visible)) if idx >= n_visible else 0
-        for i, name in enumerate(names[first : first + n_visible]):
+        first = max(0, min(sel_line - n_visible + 1, len(lines) - n_visible)) if sel_line >= n_visible else 0
+        for i, (kind, item) in enumerate(lines[first : first + n_visible]):
             line_i = first + i
-            cursor = "→ " if line_i == idx else "  "
-            if line_i == idx:
+            if kind == "header":
+                _safe_addnstr(stdscr, list_top + i, x0 + 2, item, inner_w, curses.color_pair(3) | curses.A_BOLD | curses.A_UNDERLINE)
+                continue
+            cursor = "→ " if line_i == sel_line else "  "
+            if line_i == sel_line:
                 attr = curses.A_REVERSE if focus == "type" else (curses.color_pair(4) | curses.A_BOLD)
             else:
                 attr = curses.A_NORMAL
-            _safe_addnstr(stdscr, list_top + i, x0 + 2, f"{cursor}{name}", inner_w, attr)
+            _safe_addnstr(stdscr, list_top + i, x0 + 2, f"{cursor}{item.name}", inner_w, attr)
 
         folder_row = list_top + n_visible + 1
         label = "Folder: "
-        _safe_addnstr(stdscr, folder_row, x0 + 2, label, inner_w)
+        _safe_addnstr(stdscr, folder_row, x0 + 2, label, inner_w, curses.A_DIM if is_service else 0)
         field_w = max(1, inner_w - len(label))
-        field_attr = curses.A_UNDERLINE | (curses.A_REVERSE if focus == "folder" else 0)
-        _safe_addnstr(stdscr, folder_row, x0 + 2 + len(label), folder[-field_w:], field_w, field_attr)
+        if is_service:
+            _safe_addnstr(stdscr, folder_row, x0 + 2 + len(label), "(not used — a service has no workspace)", field_w, curses.A_DIM)
+        else:
+            field_attr = curses.A_UNDERLINE | (curses.A_REVERSE if focus == "folder" else 0)
+            _safe_addnstr(stdscr, folder_row, x0 + 2 + len(label), folder[-field_w:], field_w, field_attr)
 
         hint_row = min(folder_row + 2, y0 + box_h - 2)
         hint = "↑/↓ pick type · Tab switch field · Enter confirm · Esc cancel"
@@ -1277,5 +1313,24 @@ def cmd_overview(target, follow, rebuild=False, debug=False):
         action, row = pending
         if action == "open_shell":
             launcher.start_and_open_shell(REPO_ROOT / row["env"], row["workspace"], rebuild, debug)
+        elif action == "open_service":
+            _start_service_and_show_url(REPO_ROOT / row["env"], rebuild, debug)
+        elif row["kind"] == "service":  # new_stack
+            _start_service_and_show_url(row["compose_dir"], rebuild, debug)
         else:
             launcher.start_and_open_shell(row["compose_dir"], row["folder"], rebuild, debug)
+
+
+def _start_service_and_show_url(compose_dir, rebuild, debug):
+    """Outside curses (build output streams to the real terminal, like 'o'/'n' on a toolbelt):
+    build/start a `*-service` stack and print its URL (the user opens it themselves — the
+    Stacks card shows it too), then wait for Enter so the output can be read before
+    cmd_overview re-enters the TUI."""
+    cid = launcher.start_service(compose_dir, rebuild, debug)
+    url = launcher.service_url(cid) if cid else None
+    if url:
+        print(f"🌐 {compose_dir.name} is running at {url}")
+        print(f"   Logs: docker logs -f {launcher.service_project_name(compose_dir)}")
+    elif cid:
+        print("⚠️  Started, but no published port found.")
+    input("Press Enter to return to the Stacks view … ")
