@@ -1,12 +1,13 @@
 """devtool/launcher.py — `stop`/`list`/`logs`/`build-base`, stack start/stop/teardown, and the
-build+start logic (`start_and_open_shell`) that the Stacks pane in devtool/proxy.py calls
-into. The interactive UI itself lives in
+build+start logic for toolbelts (`start_and_open_shell`) and services (`start_service`) that
+the Stacks pane in devtool/proxy.py calls into. The interactive UI itself lives in
 devtool/proxy.py; one-time host setup in devtool/hostsetup.py.
 
 Stdlib only — every Docker interaction shells out to the `docker`/`docker compose` CLI via
 devtool/docker_utils.py, no SDK.
 """
 import hashlib
+import json
 import os
 import signal
 import subprocess
@@ -82,7 +83,7 @@ def cmd_stop(target):
 
 
 def cmd_stop_all():
-    """`stop --all` — tear down every devcontainer stack, from any directory."""
+    """`stop --all` — tear down every devcontainer stack and service, from any directory."""
     print("🔍 Looking for all devcontainer stacks ...")
     pairs = _project_workdirs("label=devcontainer.env")
     if not pairs:
@@ -117,7 +118,7 @@ def start_stack(project):
 
 
 def cmd_list():
-    """`list` — every devcontainer stack, regardless of where it was started from."""
+    """`list` — every devcontainer stack/service, regardless of where it was started from."""
     rows = sorted(set(ps_rows("label=devcontainer.env", fields=[PROJECT, ENV, SERVICE, STATE, WORKSPACE])))
     if not rows:
         print("No devcontainer stacks found.")
@@ -229,14 +230,46 @@ def ensure_base_image(rebuild, debug, env):
 
 # ---------------------------------------------------------------------------
 # Discovery: every immediate subdirectory of the repo root with a
-# docker-compose.yml/.yaml; base-toolbelt sorts first.
+# docker-compose.yml/.yaml. `*-service` folders are services (see
+# discover_service_dirs), everything else a toolbelt; base-toolbelt sorts first.
 # ---------------------------------------------------------------------------
-def discover_env_dirs():
-    dirs = sorted(
+SERVICE_SUFFIX = "-service"
+
+
+def _compose_dirs():
+    return sorted(
         child for child in REPO_ROOT.iterdir()
         if child.is_dir() and ((child / "docker-compose.yml").is_file() or (child / "docker-compose.yaml").is_file())
     )
+
+
+def discover_env_dirs():
+    dirs = [d for d in _compose_dirs() if not d.name.endswith(SERVICE_SUFFIX)]
     return sorted(dirs, key=lambda d: d.name != "base-toolbelt")
+
+
+def discover_service_dirs():
+    """Top-level `*-service` folders (e.g. open-webui-service/) — top-level, not nested under
+    a `services/` folder, because common/proxy.docker-compose.yml's relative paths resolve
+    against the FIRST compose file's directory and assume it is one level below the repo root
+    (see AGENTS.md). A service is a long-running app rather than a devcontainer: no
+    /workspace, no shell, one instance host-wide."""
+    return [d for d in _compose_dirs() if d.name.endswith(SERVICE_SUFFIX)]
+
+
+def service_project_name(compose_dir):
+    """Fixed project name for a service (`open-webui-service` -> `open-webui`) — one instance
+    host-wide, so there is nothing to look up or randomize like a toolbelt's `dev-<hex>`."""
+    return compose_dir.name[: -len(SERVICE_SUFFIX)]
+
+
+def service_url(cid, container_port=8080):
+    """`http://localhost:<host port>` for a running service container, or None."""
+    for line in docker_out("port", cid, f"{container_port}/tcp").splitlines():
+        port = line.rpartition(":")[2]
+        if port.isdigit():
+            return f"http://localhost:{port}"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +296,36 @@ def _rebuild_no_cache(compose, debug):
     compose("down")
     progress = ["--progress=plain"] if debug else []
     return compose("build", "--no-cache", *progress).returncode == 0
+
+
+def start_service(compose_dir, rebuild, debug):
+    """Builds (if needed)/starts a `*-service` stack and returns the main container's id (or
+    None on failure). No shell, no workspace: the project name is fixed
+    (service_project_name), and every external named volume the compose file declares is
+    created first (`docker volume create` is idempotent) — services keep their data in
+    external volumes precisely so `down -v` (run.py stop, the TUI's 'd') can't delete it."""
+    project = service_project_name(compose_dir)
+    print(f"📂 Working in: {compose_dir}")
+    env, compose = _compose_runner(compose_dir, project, [PROXY_COMPOSE])
+    ensure_base_image(rebuild, debug, env)
+
+    cfg = compose("config", "--format", "json", capture_output=True, text=True)
+    if cfg.returncode != 0:
+        print(cfg.stderr, file=sys.stderr)
+        return None
+    for vol in json.loads(cfg.stdout).get("volumes", {}).values():
+        if vol.get("external") and vol.get("name"):
+            subprocess.run(["docker", "volume", "create", vol["name"]], capture_output=True)
+
+    if rebuild and not _rebuild_no_cache(compose, debug):
+        print("⚠️  Failed to build service.", file=sys.stderr)
+        return None
+    if compose("up", "-d", *([] if rebuild else ["--build"])).returncode != 0:
+        print("⚠️  Failed to start service.", file=sys.stderr)
+        return None
+
+    rows = ps_rows(f"label=com.docker.compose.project={project}", "label=devcontainer.kind=service", fields=[ID], all_=False)
+    return rows[0][0] if rows else None
 
 
 def start_and_open_shell(compose_dir, volume, rebuild, debug):

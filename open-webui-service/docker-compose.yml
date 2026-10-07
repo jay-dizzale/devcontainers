@@ -1,0 +1,82 @@
+# Open WebUI as a long-running SERVICE, not a devcontainer: no /workspace
+# mount, no host credentials (gh/tea config) mounted, no shell opened by
+# run.py — it's listed under "Services" in the TUI, where 'o' (re)starts it
+# and its card shows the URL to open. It deliberately does not extend common/base.docker-compose.yml
+# (that's the devcontainer base); it only copies the egress-enforcement bits
+# from it (root + NET_ADMIN for common/entrypoint.sh, the proxy env vars,
+# depends_on proxy), so every request it makes is whitelisted and logged by
+# the same proxy sidecar (common/proxy.docker-compose.yml) as a toolbelt's.
+#
+# Single instance: run.py always uses the fixed project name `open-webui`.
+# Manual run: docker volume create open-webui-data, then
+#   docker compose -p open-webui -f docker-compose.yml -f ../common/proxy.docker-compose.yml up -d --build
+services:
+  open-webui:
+    build:
+      context: ..
+      dockerfile: ./open-webui-service/Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+        OPEN_WEBUI_VERSION: ${OPEN_WEBUI_VERSION:-}
+    image: toolbelt-open-webui:latest
+    container_name: open-webui
+    init: true
+    # root + NET_ADMIN only for common/entrypoint.sh's iptables allowlist; it
+    # drops to uid 1000 before running `command`.
+    user: root
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      proxy:
+        condition: service_healthy
+    labels:
+      # devcontainer.env: makes run.py list/stop/the Stacks pane see it (and
+      # names its whitelist file, whitelist.d/open-webui-service.txt).
+      # devcontainer.kind=service: tells the TUI it's a service, not a toolbelt.
+      - "devcontainer.env=open-webui-service"
+      - "devcontainer.kind=service"
+    command: ["start-open-webui"]
+    environment:
+      - HTTP_PROXY=http://proxy:3128
+      - HTTPS_PROXY=http://proxy:3128
+      - NO_PROXY=localhost,127.0.0.1
+      - http_proxy=http://proxy:3128
+      - https_proxy=http://proxy:3128
+      - no_proxy=localhost,127.0.0.1
+      # Ollama on the Docker host, reached through the egress proxy (squid.conf
+      # ties host.docker.internal and :11434 to each other; the domain is
+      # whitelisted in whitelist.d/open-webui-service.txt).
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      # RAG: embeddings come from Ollama too, so nothing is downloaded from
+      # huggingface.co. Pull the model on the host: `ollama pull nomic-embed-text`.
+      # These seed Open WebUI's config on FIRST start only — later changes
+      # are made in Admin → Settings → Documents (stored in DATA_DIR).
+      - RAG_EMBEDDING_ENGINE=ollama
+      - RAG_EMBEDDING_MODEL=nomic-embed-text
+      - DATA_DIR=/data
+      # No outbound calls that the whitelist would only block anyway.
+      - ENABLE_OPENAI_API=false
+      - ENABLE_VERSION_UPDATE_CHECK=false
+      - ANONYMIZED_TELEMETRY=false
+      - DO_NOT_TRACK=true
+      - SCARF_NO_ANALYTICS=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - open-webui-data:/data
+    ports:
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-3080}:8080"
+
+volumes:
+  # External, so `run.py stop` / the TUI's 'd' (`docker compose down -v`)
+  # never deletes your chats, knowledge bases and vector store. run.py
+  # creates it on first start; remove it by hand with
+  # `docker volume rm open-webui-data` to really reset Open WebUI.
+  open-webui-data:
+    name: open-webui-data
+    external: true

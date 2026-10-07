@@ -29,12 +29,16 @@ services:
       # iptables allowlist in common/entrypoint.sh, not just by setting these.
       # Unrelated to the proxy.env-based HTTP_PROXY/HTTPS_PROXY build args
       # used for the image *build* in every <env>/docker-compose.yml.
+      # host.docker.internal is deliberately NOT in NO_PROXY: the iptables
+      # allowlist drops direct connections to it, so host services (e.g.
+      # Ollama on :11434) are reached through the proxy, whitelisted and
+      # logged like everything else.
       - HTTP_PROXY=http://proxy:3128
       - HTTPS_PROXY=http://proxy:3128
-      - NO_PROXY=localhost,127.0.0.1,host.docker.internal
+      - NO_PROXY=localhost,127.0.0.1
       - http_proxy=http://proxy:3128
       - https_proxy=http://proxy:3128
-      - no_proxy=localhost,127.0.0.1,host.docker.internal
+      - no_proxy=localhost,127.0.0.1
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

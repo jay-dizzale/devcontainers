@@ -15,6 +15,7 @@ WORKDIR = '{{.Label "com.docker.compose.project.working_dir"}}'
 CONFIG_FILES = '{{.Label "com.docker.compose.project.config_files"}}'
 ENV = '{{.Label "devcontainer.env"}}'
 WORKSPACE = '{{.Label "devcontainer.workspace"}}'
+KIND = '{{.Label "devcontainer.kind"}}'
 ID, STATE, PORTS = "{{.ID}}", "{{.State}}", "{{.Ports}}"
 
 

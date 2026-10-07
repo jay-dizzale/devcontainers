@@ -32,6 +32,11 @@ services:
         no_proxy: ${no_proxy:-}
     image: toolbelt-proxy:latest
     init: true
+    # So Squid can resolve host.docker.internal (e.g. Ollama on the host —
+    # see squid.conf's Ollama_port). `dev` reaches the host only through
+    # here: its iptables allowlist drops direct connections.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       # Chains Squid to the user's own corporate proxy (proxy.env), if any,
       # so the whitelist and a required corporate proxy aren't mutually

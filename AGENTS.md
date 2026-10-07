@@ -8,7 +8,8 @@ This file gives AI coding agents (Claude Code, and any other agent that reads
 A **collection of DevContainer environments**, not an application. Each top-level
 folder ending in `-toolbelt` (`base-toolbelt/`, `infrastructure-toolbelt/`,
 `java-toolbelt/`, `latex-toolbelt/`, `pico-toolbelt/`, `web-toolbelt/`) is one
-containerized development environment. All of them layer on a shared base
+containerized development environment. Folders ending in `-service`
+(`open-webui-service/`) are long-running services instead — see "Services" below. All of them layer on a shared base
 defined in `common/`. The goal is reproducible toolchains that developers
 launch via `run.py` or VS Code Dev Containers.
 
@@ -88,10 +89,18 @@ images and the scripts that build them.
   (`tenv`, `terraform-docs`, `tflint`, AWS/Azure CLIs, `spacectl`, Kafka) — it does
   **not** additionally bundle Java/Node.js. There is no standalone OpenTofu
   environment; infra tooling lives entirely in `infrastructure-toolbelt`.
-- No environment currently overrides `docker-compose.yml`'s `command` — every
+- No toolbelt overrides `docker-compose.yml`'s `command` — every
   environment idles on the base's `sleep infinity`. If you add one that needs
   a background process, add the override on that env's service rather than
   changing `common/base.docker-compose.yml`'s default for everyone.
+- **Reaching the Docker host from `dev`** goes through the proxy too:
+  `host.docker.internal` is deliberately *not* in `dev`'s `NO_PROXY` (the
+  iptables allowlist would drop a direct connection anyway), and the `proxy`
+  service has its own `host-gateway` `extra_hosts` entry to resolve it.
+  `common/proxy/squid.conf` ties `host.docker.internal` and port 11434 (Ollama)
+  to each other — that host is reachable on that port only, and that port only
+  on that host. Opening another host port means another such ACL pair, not a
+  broader `Safe_ports`.
 - No environment uses `network_mode: host` — every environment (including
   `infrastructure-toolbelt`, which previously used it) runs on Compose's
   default bridge network. Egress is restricted by iptables rules set inside
@@ -118,6 +127,40 @@ images and the scripts that build them.
   `docker-compose.yml` needs the matching `secrets: github_token: environment: "GITHUB_TOKEN"`
   block wired into `build.secrets`. Setting `GITHUB_TOKEN` (or `GH_TOKEN`) before running
   `run.py` raises the unauthenticated 60 req/hr rate limit that build otherwise hits.
+
+## Services (`*-service/`)
+
+A **service** is a long-running app built on `toolbelt-base`, not a devcontainer:
+no `/workspace` mount, no host credentials mounted, no `devcontainer.json`, no shell
+opened by `run.py`. Currently only `open-webui-service/` (Open WebUI, preconfigured
+for Ollama on the Docker host at `host.docker.internal:11434`, with Ollama embeddings
+for RAG).
+
+- **Top-level `<name>-service/` folders, not nested under `services/`** — the
+  compose path-resolution gotcha (see below) means `common/proxy.docker-compose.yml`'s
+  `../common/...` paths only work when the first compose file sits one level below the
+  repo root. `launcher.discover_env_dirs` skips `*-service` folders;
+  `launcher.discover_service_dirs` lists them. The `n` modal shows them under their own
+  "Services" heading (the folder field doesn't apply).
+- **Does not extend `common/base.docker-compose.yml`** (that's the devcontainer base,
+  with its workspace and credential mounts). It copies only the egress bits —
+  `user: root`, `cap_add: NET_ADMIN`, `depends_on: proxy: service_healthy`, the
+  proxy env vars, `extra_hosts` — so the base image's `common/entrypoint.sh` still
+  sets the iptables allowlist and the proxy sidecar is merged in exactly as for a
+  toolbelt (via `COMPOSE_FILE` in `launcher.start_service`). Its traffic shows up in
+  the TUI's proxy tabs like any stack's.
+- **Labels**: `devcontainer.env=<dir name>` (so `list`/`stop`/the Stacks pane see it,
+  and the Global Whitelist's `s` option targets `whitelist.d/<dir name>.txt`) plus
+  `devcontainer.kind=service`. Single instance: fixed project name (dir name minus
+  `-service`, `launcher.service_project_name`), fixed `container_name`.
+- **Stacks pane**: a service's card shows `service · http://localhost:<port>`
+  (parsed from the container's published port for container port 8080). `o`/`n` start
+  it (`launcher.start_service`) and print the URL — no browser is opened, no shell.
+- **Data lives in an `external: true` named volume** (`open-webui-data`), created by
+  `start_service` before `up` — so `run.py stop`/`d` (`docker compose down -v`) never
+  deletes it. Resetting means `docker volume rm` by hand.
+- Its container `command` is overridden (`start-open-webui`, which runs Open WebUI in
+  the foreground and falls back to `sleep infinity` if it exits).
 
 ## Egress proxy and domain whitelist
 
@@ -250,17 +293,17 @@ explicitly allowed, and every request (allowed or denied) is logged.
     `run.py` was invoked from: `dev` gets run from all over the host, so every stack on every
     project shows up here regardless. Each card embeds its env type in the top border
     (top-right) and the stack's own container state top-left (" RUNNING "/" EXITED " — the
-    `dev` container, from `docker ps`'s `.State`, not the proxy's); the whole border
+    `dev`/service container, from `docker ps`'s `.State`, not the proxy's); the whole border
     is green when that container is running, red otherwise. Inside, labeled fields: `ID` has
     its label and value combined on one line (with the `➤` active-stack marker to its left and
     "PROXY ACTIVE"/"PROXY INACTIVE" (green/red) right-aligned on that same line), then `FOLDER`
-    keeps a separate title line and value line below it (clipped from the left,
-    `…/end/of/path`, since the end is what tells stacks apart and a workspace path needs the
-    full line's width) — no separate column header above the cards, since a single-column
-    header never matched a card layout. Cards do **not** show ports — that's the dedicated
-    Ports sub-tab (see below) — since a card is cramped and ports only matter when you're
-    about to open one. Selection is shown by shape, not color (color is the container
-    state): the selected card gets a heavy bold border (`┏━┓`), rather than reversing the
+    (clipped from the left, `…/end/of/path`, since the end is what tells stacks apart) or, for
+    a service, `URL` — either way kept on a separate title line and value line below it, since
+    a workspace path needs the full line's width — no separate column header above the cards,
+    since a single-column header never matched a card layout. Cards do **not** show ports —
+    that's the dedicated Ports sub-tab (see below) — since a card is cramped and ports only
+    matter when you're about to open one. Selection is shown by shape, not color (color is the
+    container state): the selected card gets a heavy bold border (`┏━┓`), rather than reversing the
     content too, which looked noisy. The list always has one
     extra trailing "+ New stack" card past the real stacks, so starting a new one is just
     another list item (`Enter` on it) as well as a dedicated key. `↑`/`↓` selects a card, `o`
