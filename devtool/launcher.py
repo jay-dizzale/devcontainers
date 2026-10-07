@@ -339,11 +339,8 @@ def start_and_open_shell(compose_dir, volume, rebuild, debug):
 
     # -u ubuntu: the container's default user is root (the entrypoint needs it briefly for the
     # egress iptables rules before dropping privileges itself) — exec would land as root too.
-    print(f"🚀 Opening zsh in service '{service}' …")
-    result = compose("exec", "-ti", "-u", "ubuntu", service, "zsh")
-    if result.returncode != 0:
-        return result.returncode
-
-    print("\n👋 Shell exited — the stack is still running.")
-    print("   Run './run.py stop' (or 'dev stop') to stop & delete it.")
-    return 0
+    # exec, not subprocess.run: run.py replaces itself with `docker compose exec`, so nothing of
+    # it lingers (not even an idle parent) while the user works in the container.
+    print(f"🚀 Opening zsh in service '{service}' …", flush=True)
+    os.chdir(compose_dir)
+    os.execvpe("docker", ["docker", "compose", "exec", "-ti", "-u", "ubuntu", service, "zsh"], env)

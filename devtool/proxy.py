@@ -2,7 +2,8 @@
 (1/3 width — every devcontainer stack on the host, not just the current directory's),
 proxy settings on the right (2/3 width — Domain Statistics/Global Whitelist/Custom
 Whitelist/Access log sub-tabs). 'o'/'n' tear the TUI down first, since a
-real interactive zsh session can't run inside curses' alternate screen, then come back to it.
+real interactive zsh session can't run inside curses' alternate screen; the program ends
+when that shell exits.
 Non-tty: a one-shot Domain Statistics snapshot; `-f`: a passive 2s-redraw loop.
 
 Stdlib only (subprocess/curses — no pip install, no `docker` SDK). Ported from a POSIX-sh
@@ -14,6 +15,9 @@ proxy and domain whitelist" section for the full architecture.
 import contextlib
 import curses
 import io
+import os
+import select
+import signal
 import sys
 import time
 from pathlib import Path
@@ -1030,7 +1034,7 @@ class OverviewApp:
         stdscr.timeout(-1)  # block for the choice — resumed by the caller's loop afterward
         try:
             while True:
-                key = stdscr.getch()
+                key = _getch(stdscr)
                 if key == 27:  # bare Esc — no arrow-sequence follow-up expected here
                     return None
                 if 0 <= key < 256 and chr(key).lower() in keys:
@@ -1180,6 +1184,40 @@ _ARROW_BY_FINAL_BYTE = {
 }
 
 
+class _TerminalGone(Exception):
+    """The controlling terminal went away (window closed, SSH dropped) — see _getch."""
+
+
+def _tty_hung_up():
+    """True if stdin's tty is dead: readable but yields EOF/EIO. A real pending byte (an
+    unlikely race with curses' own read) is pushed back with ungetch rather than lost."""
+    fd = sys.stdin.fileno()
+    try:
+        ready, _, _ = select.select([fd], [], [], 0)
+        if not ready:
+            return False
+        data = os.read(fd, 1)
+    except OSError:
+        return True
+    if not data:
+        return True
+    curses.ungetch(data[0])
+    return False
+
+
+def _getch(stdscr):
+    """stdscr.getch() that notices a vanished terminal. Once the tty is gone, getch() stops
+    honoring its timeout and returns -1 instantly, forever — so every `if key == -1:
+    continue` loop in this module spun at ~100% CPU after the terminal window was closed
+    (seen for real: orphaned `run.py` processes pegging a core each). A -1 that came back
+    far sooner than any timeout we set (100/200ms, or blocking) triggers a real check."""
+    start = time.monotonic()
+    key = stdscr.getch()
+    if key == -1 and time.monotonic() - start < 0.01 and _tty_hung_up():
+        raise _TerminalGone()
+    return key
+
+
 def _read_key(stdscr):
     """stdscr.getch() wrapper that manually reassembles `ESC [ <letter>` arrow-key
     sequences. With stdscr.timeout() set (needed here for the idle refresh tick), ncurses'
@@ -1189,13 +1227,13 @@ def _read_key(stdscr):
     letter) that persisted even after curses.set_escdelay(). This reassembly is the actual
     fix; a bare lone ESC (nothing follows within the timeout window) is returned as-is.
     """
-    key = stdscr.getch()
+    key = _getch(stdscr)
     if key != 27:
         return key
-    k2 = stdscr.getch()
+    k2 = _getch(stdscr)
     if k2 != ord("["):
         return key if k2 == -1 else k2
-    k3 = stdscr.getch()
+    k3 = _getch(stdscr)
     return _ARROW_BY_FINAL_BYTE.get(k3, key)
 
 
@@ -1267,15 +1305,29 @@ def cmd_overview(target, follow, rebuild=False, debug=False):
         run_snapshot(cid, env, project, workspace)
         return
 
-    # Loops back into the TUI after a shell exits instead of ending the program — 'o'/'n' only
-    # tear curses down because a real interactive zsh session can't run inside its alternate
-    # screen (see start_and_open_shell), not because the whole app should quit.
-    while True:
+    # Closing the terminal must end the app. SIGHUP is set explicitly in case it was inherited
+    # as ignored; _getch covers terminals that vanish without delivering one at all.
+    def _on_hangup(signum, frame):
+        raise _TerminalGone()
+    signal.signal(signal.SIGHUP, _on_hangup)
+
+    # 'o'/'n' tear curses down (a real interactive zsh session can't run inside its alternate
+    # screen) and hand the request back here; start_and_open_shell then exec's into the shell,
+    # replacing this process. Exiting the shell drops the user back into their own terminal
+    # rather than into the TUI again — bare `dev` reopens it when it's actually wanted.
+    try:
         pending = curses.wrapper(run_app, cid, env, project, workspace, target)
-        if not pending:
-            break
-        action, row = pending
-        if action == "open_shell":
-            launcher.start_and_open_shell(REPO_ROOT / row["env"], row["workspace"], rebuild, debug)
-        else:
-            launcher.start_and_open_shell(row["compose_dir"], row["folder"], rebuild, debug)
+    except _TerminalGone:
+        os._exit(129)  # nothing left to draw to or clean up on — 128 + SIGHUP
+    except curses.error:
+        # curses.wrapper's endwin() on a dead tty raises too, masking the _TerminalGone.
+        if not os.isatty(sys.stdin.fileno()) or select.select([sys.stdin], [], [], 0)[0]:
+            os._exit(129)
+        raise
+    if not pending:
+        return
+    action, row = pending
+    if action == "open_shell":
+        launcher.start_and_open_shell(REPO_ROOT / row["env"], row["workspace"], rebuild, debug)
+    else:
+        launcher.start_and_open_shell(row["compose_dir"], row["folder"], rebuild, debug)
