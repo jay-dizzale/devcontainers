@@ -72,19 +72,25 @@ def proxy_cid_for_project(project):
     return rows[0][0] if rows else None
 
 
-def resolve_stack(target_dir, required=True):
+def resolve_stack(target_dir, required=True, interactive=True):
     """Returns (project, env, workspace) for the stack mounted from target_dir, found by its
     `devcontainer.workspace` label (set to the same absolute path as the /workspace mount).
-    Prompts (plain input()) if more than one stack is running from that directory. With
-    `required=False`, returns None instead of dying when nothing matches — used by the Stacks
-    tab, where "no stack yet for this directory" is an expected, recoverable state."""
+    With `interactive=True` (the default — `logs`/`stop`, where the caller needs exactly one,
+    user-picked stack), prompts (plain input()) if more than one stack is running from that
+    directory. With `interactive=False`, that choice is skipped and the first one (sorted) is
+    returned silently instead — used by `cmd_overview`, where this only seeds which stack the
+    Proxy pane starts on and the Stacks tab already lists (and lets you switch to) every stack
+    anyway, so blocking the whole TUI behind a plain-text prompt before it even opens would be
+    disruptive for no benefit. With `required=False`, returns None instead of dying when
+    nothing matches — used by the Stacks tab, where "no stack yet for this directory" is an
+    expected, recoverable state."""
     print(f"🔍 Looking for containers mounted from: {target_dir}", file=sys.stderr)
     triples = sorted(set(ps_rows(f"label=devcontainer.workspace={target_dir}", fields=[PROJECT, ENV, WORKSPACE])))
     if not triples:
         if not required:
             return None
         die(f"No containers mounted from {target_dir}.")
-    if len(triples) == 1:
+    if len(triples) == 1 or not interactive:
         return triples[0]
 
     print("🐳 Multiple stacks running from this directory:", file=sys.stderr)

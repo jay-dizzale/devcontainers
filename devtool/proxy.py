@@ -978,12 +978,28 @@ class OverviewApp:
         confirmed or cancelled. Returns
         {"kind": "toolbelt"|"service", "compose_dir": Path, "folder": str} or None (Esc).
         Toolbelts and services are listed under their own headings; the folder field only
-        applies to toolbelts (a service has no workspace)."""
+        applies to toolbelts (a service has no workspace).
+
+        A toolbelt that already has a stack mounted from `self.target_dir` is tagged
+        "running here"/"<state> here" and, when nothing else picks a starting selection
+        (`self.env` not among the choices — always true for `cmd_run`, which has no active
+        stack), preselected — so confirming it is the obvious thing to do instead of a blind
+        Enter. This is not a separate code path: `compose_dir` for that entry is the same
+        `REPO_ROOT/<env>` a brand-new pick for that toolbelt would use, and
+        `launcher.start_and_open_shell` already reconnects to a stack whose env+workspace
+        labels match rather than starting a redundant second one — the tag only makes that
+        existing behavior visible instead of something you had to already know."""
         env_dirs = launcher.discover_env_dirs()
         service_dirs = launcher.discover_service_dirs()
         if not env_dirs and not service_dirs:
             self.message = "⚠️  No docker-compose files found — nothing to pick from."
             return None
+
+        running_here = {
+            s["env"]: s["container_state"]
+            for s in list_all_stacks()
+            if s["kind"] == "toolbelt" and s["workspace"] == self.target_dir
+        }
 
         # Display lines: ("header", title) or (kind, Path). `choices` indexes only the
         # selectable (non-header) lines, so ↑/↓ skip the headings.
@@ -994,7 +1010,13 @@ class OverviewApp:
                 lines.extend((kind, d) for d in dirs)
         choices = [i for i, (kind, _) in enumerate(lines) if kind != "header"]
         names = [d.name for kind, d in lines if kind != "header"]
-        idx = names.index(self.env) if self.env in names else 0
+        running_here_names = sorted(n for n in running_here if n in names)
+        if self.env in names:
+            idx = names.index(self.env)
+        elif running_here_names:
+            idx = names.index(running_here_names[0])
+        else:
+            idx = 0
         folder = self.target_dir
         focus = "type"
 
@@ -1002,7 +1024,7 @@ class OverviewApp:
         try:
             while True:
                 kind, compose_dir = lines[choices[idx]]
-                self._draw_new_stack_modal(stdscr, lines, choices[idx], folder, focus)
+                self._draw_new_stack_modal(stdscr, lines, choices[idx], folder, focus, running_here)
                 key = _read_key(stdscr)
                 if key == -1:
                     continue
@@ -1027,7 +1049,7 @@ class OverviewApp:
             curses.curs_set(0)
             stdscr.timeout(200)
 
-    def _draw_new_stack_modal(self, stdscr, lines, sel_line, folder, focus):
+    def _draw_new_stack_modal(self, stdscr, lines, sel_line, folder, focus, running_here=None):
         h, w = stdscr.getmaxyx()
         box_w = max(40, min(64, w - 4))
         inner_w = box_w - 4
@@ -1052,7 +1074,13 @@ class OverviewApp:
                 attr = curses.A_REVERSE if focus == "type" else (curses.color_pair(4) | curses.A_BOLD)
             else:
                 attr = curses.A_NORMAL
-            _safe_addnstr(stdscr, list_top + i, x0 + 2, f"{cursor}{item.name}", inner_w, attr)
+            label = item.name
+            state = (running_here or {}).get(item.name) if kind == "toolbelt" else None
+            if state is not None:
+                label += "  (running here)" if state == "running" else f"  ({state} here)"
+                if line_i != sel_line:
+                    attr = curses.color_pair(1) if state == "running" else curses.color_pair(2)
+            _safe_addnstr(stdscr, list_top + i, x0 + 2, f"{cursor}{label}", inner_w, attr)
 
         folder_row = list_top + n_visible + 1
         label = "Folder: "
@@ -1424,10 +1452,15 @@ def cmd_overview(target, follow, rebuild=False, debug=False):
     Whitelist/Custom Whitelist/Access log tabs, if any exists for this exact directory, and
     (b) where a brand-new environment gets
     created when the Stacks tab's 'n' action is used. It does NOT filter which existing
-    stacks the Stacks tab lists — that's always every stack on the host, any directory."""
+    stacks the Stacks tab lists — that's always every stack on the host, any directory.
+    `resolve_stack` is called with `interactive=False`: if more than one stack is mounted
+    from `target`, this always opens straight into the TUI with the first one (sorted) just
+    pre-selected, rather than blocking behind a plain-text "which one did you mean?" prompt
+    before the Stacks tab — which already lists every one of them and lets `↑`/`↓`/Enter
+    switch the active stack with no such prompt needed."""
     project, env, workspace, cid = None, None, None, None
 
-    resolved = resolve_stack(target, required=False)
+    resolved = resolve_stack(target, required=False, interactive=False)
     if resolved:
         project, env, workspace = resolved
         cid = proxy_cid_for_project(project)
@@ -1486,11 +1519,12 @@ def cmd_overview(target, follow, rebuild=False, debug=False):
             launcher.start_and_open_shell(row["compose_dir"], row["folder"], rebuild, debug)
 
 
-def _start_service_and_show_url(compose_dir, rebuild, debug):
+def _start_service_and_show_url(compose_dir, rebuild, debug, pause_message="Press Enter to return to the Stacks view … "):
     """Outside curses (build output streams to the real terminal, like 'o'/'n' on a toolbelt):
     build/start a `*-service` stack and print its URL (the user opens it themselves — the
-    Stacks card shows it too), then wait for Enter so the output can be read before
-    cmd_overview re-enters the TUI."""
+    Stacks card shows it too), then wait for Enter so the output can be read before the
+    caller re-enters the TUI (cmd_overview) or just exits (cmd_run — see its own
+    `pause_message`)."""
     cid = launcher.start_service(compose_dir, rebuild, debug)
     url = launcher.service_url(cid) if cid else None
     if url:
@@ -1498,4 +1532,50 @@ def _start_service_and_show_url(compose_dir, rebuild, debug):
         print(f"   Logs: docker logs -f {launcher.service_project_name(compose_dir)}")
     elif cid:
         print("⚠️  Started, but no published port found.")
-    input("Press Enter to return to the Stacks view … ")
+    input(pause_message)
+
+
+def cmd_run(target, rebuild=False, debug=False):
+    """`run.py run` / `dev run` — a shortcut straight to the "pick a toolbelt (or service) to
+    provision and start" modal that the Stacks tab's 'n' action opens, skipping the
+    Stacks/Proxy overview entirely. For someone who already knows they want a brand-new
+    environment, bare `run.py` would mean: wait for the whole TUI to draw, then press `n`
+    anyway — this gets there in one step. Reuses OverviewApp._new_stack_modal (same picker,
+    same keys) rather than duplicating it; the modal doesn't depend on the rest of the app's
+    state (Stacks/Proxy rows, the active stack, ...), only `target_dir` (the modal's default
+    folder) and `env` (which entry starts pre-selected — None here, so the first one), so a
+    throwaway OverviewApp built with no active stack is enough to drive it standalone."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        die("'run.py run' needs an interactive terminal to pick an environment.")
+
+    choice, message = curses.wrapper(_run_picker, target)
+    if choice is None:
+        print(message or "Cancelled.")
+        return
+
+    if choice["kind"] == "service":
+        _start_service_and_show_url(choice["compose_dir"], rebuild, debug, pause_message="Press Enter to continue … ")
+    else:
+        launcher.start_and_open_shell(choice["compose_dir"], choice["folder"], rebuild, debug)
+
+
+def _run_picker(stdscr, target_dir):
+    """curses.wrapper entry point for cmd_run: same color/escdelay setup as run_app, then
+    straight into the new-stack modal — no Stacks/Proxy panes drawn at all."""
+    curses.curs_set(0)
+    if hasattr(curses, "set_escdelay"):  # Python 3.9+
+        curses.set_escdelay(25)
+    try:
+        curses.start_color()
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_GREEN, -1)
+        curses.init_pair(2, curses.COLOR_RED, -1)
+        curses.init_pair(3, curses.COLOR_CYAN, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+    except curses.error:
+        pass
+    stdscr.timeout(100)
+
+    app = OverviewApp(None, None, None, None, target_dir)
+    choice = app._new_stack_modal(stdscr)
+    return choice, app.message

@@ -162,6 +162,20 @@ Among containers carrying the `devcontainer.env` label, this finds those whose
 `docker compose down -v` for each matching stack (containers, networks and
 anonymous volumes removed).
 
+### Start a new environment directly
+
+```sh
+./run.py run
+./run.py run -v /path/to/your/project
+```
+
+Already know you want a brand-new environment? This skips the Stacks/Proxy overview and
+opens straight into the same toolbelt/service picker the Stacks tab's `n` opens, then
+builds/starts your choice immediately (opens a shell for a toolbelt, prints the URL for a
+service). Needs a real terminal. If a toolbelt already has a stack running (or stopped) for
+the current directory, that entry is marked "(running here)"/"(stopped here)" and
+preselected — confirming it just reconnects you instead of starting a duplicate.
+
 ### List running stacks
 
 ```sh

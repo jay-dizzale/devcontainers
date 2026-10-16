@@ -442,6 +442,32 @@ explicitly allowed, and every request (allowed or denied) is logged.
   further narrowed to containers whose compose config-files label actually includes
   `common/proxy.docker-compose.yml`, so it can never touch an unrelated project's own `proxy`
   service.
+- **Bare `run.py`/`dev` never blocks on a plain-text prompt before the TUI opens, even when
+  more than one stack is mounted from the invocation directory.** `cmd_overview` calls
+  `resolve_stack(target, required=False, interactive=False)` — `interactive=False` skips
+  the "which one did you mean?" `input()` prompt that `resolve_stack` otherwise uses (still
+  the right behavior for `run.py logs`/`stop`, which need exactly one, user-picked stack) and
+  just takes the first (sorted) match to seed which stack starts "active" in the Proxy pane.
+  There's no real choice being skipped: the Stacks tab already lists every stack on the host
+  and `↑`/`↓`/Enter switches the active one with no prompt needed, so blocking the whole TUI
+  behind a question it was about to let you answer anyway was pure friction.
+- **`run.py run` / `dev run`** is a shortcut for "I already know I want a brand-new
+  environment" — it skips the Stacks/Proxy overview entirely and opens straight into the same
+  toolbelt/service picker modal the Stacks tab's `n` opens (`proxy.cmd_run`/`_run_picker`,
+  reusing `OverviewApp._new_stack_modal` via a throwaway `OverviewApp` built with no active
+  stack — the modal only reads `target_dir`/`env`/`message` off `self`, not the rest of the
+  app's state), then immediately builds/starts the chosen one: opens a shell for a toolbelt
+  (`launcher.start_and_open_shell`, same as `o`), or starts it and prints the URL for a
+  service (`_start_service_and_show_url`). Needs a real terminal, same as the modal itself.
+  If a toolbelt already has a stack mounted from the target directory, that entry in the
+  picker is tagged "(running here)"/"(<state> here)" (green/red, via `list_all_stacks()`
+  filtered to `kind == "toolbelt"` and `workspace == target_dir`) and preselected — so the
+  obvious thing to confirm is "resume the one already here", not "start a redundant second
+  one". No separate code path backs this: that entry's `compose_dir` is the same
+  `REPO_ROOT/<env>` a from-scratch pick for that toolbelt would use, and
+  `launcher.start_and_open_shell` already reconnects by matching the env+workspace labels
+  rather than starting a duplicate — the tag only surfaces that existing behavior in the UI
+  instead of requiring the user to already know it.
 - **`setup`'s own leading `-v` must be extracted *before* checking whether the next token is
   `setup`.** The `dev()` shell function `run.py setup` installs always runs
   `run.py -v "$(pwd)" "$@"` — a leading `-v <path>` ahead of whatever was actually typed.
@@ -470,6 +496,12 @@ explicitly allowed, and every request (allowed or denied) is logged.
 ./run.py -r                          # force a from-scratch rebuild when you 'o'/'n' an environment
 ./run.py --debug                     # verbose docker build output (--progress=plain)
 ./run.py -f                          # passive — redraws the Domain Statistics table every 2s, no input
+
+# Skip the TUI and go straight to the "pick a toolbelt/service" modal ('n'
+# on the Stacks tab), then build/start it immediately. Needs a real terminal.
+./run.py run
+./run.py run -v /path/to/your/project
+./run.py run -r --debug
 
 # Build only the shared base image (toolbelt-base:latest), then exit
 ./run.py build-base [-r]

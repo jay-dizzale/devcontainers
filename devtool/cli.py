@@ -47,6 +47,12 @@ Usage:
       non-terminal output (and no -f): one-shot Domain Stats snapshot plus
       an "add a domain" prompt (also always local.txt).
 
+  ./run.py run [-v /path/to/mount] [-r] [--debug]
+      Skip the Stacks/Proxy overview and go straight to the "pick a
+      toolbelt or service" modal (same picker as the Stacks tab's `n`),
+      then build/start it immediately — open a shell for a toolbelt, print
+      the URL for a service. Needs an interactive terminal.
+
   ./run.py setup
       One-time host setup: git identity, container shell config, CA
       certificate bundle, proxy settings, and the `dev` shell function.
@@ -107,7 +113,7 @@ def main(argv):
 
 
 def _run_generic(args, invocation_dir):
-    stop = stop_all = do_list = do_logs = follow = rebuild = debug = build_base = False
+    stop = stop_all = do_list = do_logs = do_run = follow = rebuild = debug = build_base = False
     volume_in = invocation_dir
 
     i = 0
@@ -122,6 +128,8 @@ def _run_generic(args, invocation_dir):
             do_list = True; i += 1
         elif tok == "logs":
             do_logs = True; i += 1
+        elif tok == "run":
+            do_run = True; i += 1
         elif tok == "build-base":
             build_base = True; i += 1
         elif tok == "--all":
@@ -148,6 +156,9 @@ def _run_generic(args, invocation_dir):
         return 0
     if do_logs:
         launcher.cmd_logs(volume, follow)
+        return 0
+    if do_run:
+        proxy.cmd_run(volume, rebuild, debug)
         return 0
     if stop_all:
         if not stop:
