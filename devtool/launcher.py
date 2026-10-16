@@ -209,13 +209,12 @@ def ensure_base_image(rebuild, debug, env):
     else:
         print(f"🏗️  Rebuilding base image {BASE_IMAGE} (common/ changed or --rebuild) ...")
 
-    # --progress=plain always, not just with -d: Docker's default "auto" progress collapses
-    # a long-running RUN step (install-common.sh can take minutes) to a single
-    # non-scrolling status line and only dumps its output if the step fails — indistinguishable
-    # from a hang until then. -d/--debug adds real Docker debug-level logging (-D) on top.
-    cmd = ["docker", "build", "--progress=plain"]
+    # -d/--debug: --progress=plain (Docker's default "auto" progress collapses a long-running
+    # RUN step to a single non-scrolling status line and only dumps its output if the step
+    # fails) plus Docker's own debug-level logging (-D) on top.
+    cmd = ["docker", "build"]
     if debug:
-        cmd.append("--debug")
+        cmd += ["--progress=plain", "--debug"]
     if rebuild:
         cmd.append("--no-cache")
     cmd += [
@@ -294,18 +293,16 @@ def _compose_runner(compose_dir, project, compose_files, **extra_env):
     return env, compose
 
 
-def _rebuild_no_cache(compose):
+def _rebuild_no_cache(compose, debug):
     """-r: tear down first so --no-cache is never skipped. Returns True on success.
     `--progress` is a GLOBAL `docker compose` flag — it has to come *before* the
     subcommand (`compose("--progress=plain", "build", ...)`), not after it, or compose
     rejects it ("--progress is a global compose flag, better use `docker compose
-    --progress xx build ...`") and silently falls back to its default "auto" progress,
-    which collapses a long-running RUN step to a single non-scrolling status line and only
-    dumps its output if that step fails. Always on, not gated behind -d/--debug — there's no
-    reason anyone would want the default to be "no visible progress until a failure"."""
+    --progress xx build ...`") and silently falls back to its default "auto" progress."""
     print("🔨 Rebuilding from scratch (no cache) ...")
     compose("down")
-    return compose("--progress=plain", "build", "--no-cache").returncode == 0
+    progress = ["--progress=plain"] if debug else []
+    return compose(*progress, "build", "--no-cache").returncode == 0
 
 
 def start_service(compose_dir, rebuild, debug):
@@ -330,10 +327,11 @@ def start_service(compose_dir, rebuild, debug):
         if vol.get("external") and vol.get("name"):
             subprocess.run(["docker", "volume", "create", vol["name"]], capture_output=True)
 
-    if rebuild and not _rebuild_no_cache(compose):
+    if rebuild and not _rebuild_no_cache(compose, debug):
         print("⚠️  Failed to build service.", file=sys.stderr)
         return None
-    if compose("--progress=plain", "up", "-d", *([] if rebuild else ["--build"])).returncode != 0:
+    progress = ["--progress=plain"] if debug else []
+    if compose(*progress, "up", "-d", *([] if rebuild else ["--build"])).returncode != 0:
         print("⚠️  Failed to start service.", file=sys.stderr)
         return None
 
@@ -363,7 +361,7 @@ def start_and_open_shell(compose_dir, volume, rebuild, debug):
     env, compose = _compose_runner(compose_dir, project, [PROXY_COMPOSE, CONTAINER_NAME_COMPOSE], VOLUME=volume)
     ensure_base_image(rebuild, debug, env)
 
-    if rebuild and not _rebuild_no_cache(compose):
+    if rebuild and not _rebuild_no_cache(compose, debug):
         die("Failed to build stack.")
 
     if compose("ps", "--status", "running", "-q", capture_output=True, text=True).stdout.strip():
@@ -376,7 +374,8 @@ def start_and_open_shell(compose_dir, volume, rebuild, debug):
             jv = {"1": "8", "2": "11", "3": "17", "4": "21", "5": "25"}.get(input())
             if jv:
                 env["JAVA_VERSION"] = jv
-        if compose("--progress=plain", "up", "-d", *([] if rebuild else ["--build"])).returncode != 0:
+        progress = ["--progress=plain"] if debug else []
+        if compose(*progress, "up", "-d", *([] if rebuild else ["--build"])).returncode != 0:
             die("Failed to start stack.")
 
     print("ℹ️  The stack keeps running after you exit the shell — it is not stopped or deleted automatically.")

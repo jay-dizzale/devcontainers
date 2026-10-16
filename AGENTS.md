@@ -295,24 +295,20 @@ explicitly allowed, and every request (allowed or denied) is logged.
   second, independent latent bug it had also been masking: `localedef`'s `-A
   /usr/share/locale/locale.alias` argument errors out on Ubuntu 26.04 (that alias file no
   longer exists in its glibc) — dropped; generating the locale doesn't need it.
-- **Build output always streams line-by-line now — it used to show nothing at all until a
-  failure.** Docker's default "auto" progress collapses a long-running `RUN` step (exactly
-  `install-common.sh`'s kind — several minutes across apt-get and half a dozen
-  `sh install-X.sh` calls) to a single non-scrolling status line, and only dumps that step's
-  buffered output if it fails — indistinguishable from a silent hang while it's still
-  running. `devtool/launcher.py`'s `ensure_base_image` already passed `--progress=plain`,
-  but only when `-d`/`--debug` was given; `_rebuild_no_cache` and the plain
-  `compose("up", "-d", "--build")` calls in `start_and_open_shell`/`start_service` passed no
-  progress flag at all, ever (so `-d` didn't even reach them) — worse, `_rebuild_no_cache`'s
-  attempt put `--progress=plain` *after* `build`/`--no-cache`, which compose rejects:
-  `--progress` is a **global** `docker compose` flag and has to come before the subcommand
+- **`-d`/`--debug` is what switches build output from Docker's default collapsed "auto"
+  progress to a verbose, line-by-line log (`--progress=plain`), plus Docker's own
+  debug-level logging (`-D`) on top.** Without `-d`, a long-running `RUN` step (e.g.
+  `install-common.sh`, several minutes across apt-get and half a dozen `sh install-X.sh`
+  calls) collapses to a single non-scrolling status line and only dumps its buffered output
+  if it fails — indistinguishable from a silent hang while it's still running; pass `-d`
+  when that matters. `_rebuild_no_cache` and the `compose("up", "-d", "--build")` calls in
+  `start_and_open_shell`/`start_service` used to pass no progress flag at all, regardless of
+  `-d` (so it never even reached them there) — and `_rebuild_no_cache`'s own attempt put
+  `--progress=plain` *after* `build`/`--no-cache`, which compose rejects: `--progress` is a
+  **global** `docker compose` flag and has to come before the subcommand
   (`compose("--progress=plain", "build", ...)`, not `compose("build", "--progress=plain")`)
   or it's silently ineffective (compose warns and falls back to its default). All three now
-  always pass `--progress=plain` in the right position, unconditionally — there's no reason
-  anyone would want the default to be "no visible progress until a failure". `-d`/`--debug`
-  still has a job: it now adds `docker build`'s own `-D`/`--debug` (real debug-level
-  logging) on top of the always-on line-by-line output, rather than being the only way to
-  get any output at all.
+  correctly thread `debug` through to the right, correctly-positioned flag.
 - **Day-to-day management is just `./run.py [-v /path] [-r] [-d] [-f]`** — bare, no
   subcommand, not raw `docker`. `devtool/cli.py`'s fallthrough (nothing else matched) calls
   straight into `devtool/proxy.py` — a **Python 3, stdlib-only** module (`subprocess`/`curses`;
@@ -568,15 +564,15 @@ explicitly allowed, and every request (allowed or denied) is logged.
 ./run.py
 ./run.py -v /path/to/your/project    # mount a different directory into /workspace
 ./run.py -r                          # force a from-scratch rebuild when you 'o'/'n' an environment
-./run.py -d                          # (or --debug) adds Docker's own debug-level build logging
+./run.py -d                          # (or --debug) line-by-line build log + Docker debug logging
 ./run.py -f                          # passive — redraws the Domain Statistics table every 2s, no input
 
 # Skip the TUI and go straight to the "pick a toolbelt/service" modal ('n'
 # on the Stacks tab), then build/start it immediately. Needs a real terminal.
 ./run.py run
 ./run.py run -v /path/to/your/project
-./run.py run -r -d                   # -d: Docker's own debug-level logging, on top of the
-                                      # line-by-line build output that's always on
+./run.py run -r -d                   # -d: verbose line-by-line build log (--progress=plain)
+                                      # + Docker's own debug-level logging
 
 # Build only the shared base image (toolbelt-base:latest), then exit
 ./run.py build-base [-r] [-d]

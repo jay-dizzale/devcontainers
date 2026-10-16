@@ -51,9 +51,9 @@ Usage:
       Skip the Stacks/Proxy overview and go straight to the "pick a
       toolbelt or service" modal (same picker as the Stacks tab's `n`),
       then build/start it immediately — open a shell for a toolbelt, print
-      the URL for a service. Needs an interactive terminal. Build output
-      always streams line-by-line; -d additionally turns on Docker's own
-      debug-level logging on top of that.
+      the URL for a service. Needs an interactive terminal. -d streams the
+      build log line-by-line plus Docker's own debug-level logging; without
+      it, Docker's default collapsed progress is used.
 
   ./run.py setup
       Host setup: a curses form for git identity, CA certificate bundle,
@@ -90,8 +90,8 @@ Options:
   -v, --volume <path>   Directory to mount at /workspace (default: cwd).
   -r, --rebuild         Force a from-scratch rebuild (--no-cache).
   -f, --follow          Passive/follow mode instead of the interactive app or a one-shot view.
-  -d, --debug           Docker's own debug-level build logging, on top of the
-                        line-by-line build output that's always on.
+  -d, --debug           Verbose, line-by-line docker build output (--progress=plain)
+                        plus Docker's own debug-level logging.
 
 If installed via `run.py setup`, all of the above also work as `dev ...`
 (e.g. `dev stop --all`, `dev list`).
