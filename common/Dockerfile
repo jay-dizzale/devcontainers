@@ -3,6 +3,23 @@ FROM ubuntu:26.04
 # Build-only: no TTY during docker build, so keep debconf from probing for a frontend
 ARG DEBIAN_FRONTEND=noninteractive
 
+# Enterprise proxy support for the *build* (runtime egress goes through the dedicated
+# whitelist proxy instead — common/base.docker-compose.yml's `environment:` block sets
+# HTTP_PROXY et al. to http://proxy:3128 at container start, overriding anything baked in
+# here). Docker/BuildKit documents these six exact names as "predefined" build-args that
+# don't need an ARG declaration to reach RUN instructions — but that implicit path has
+# proven unreliable in practice (apt-get inside install-common.sh failing with "Temporary
+# failure resolving ..." while fetching `rustup`, because the proxy never actually reached
+# that RUN). Declaring them explicitly here makes it the ordinary, always-reliable
+# ARG-to-RUN-environment mechanism instead of depending on that implicit special case.
+# ARG, not ENV: ARG values never persist into the image's/container's runtime environment.
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+
 LABEL org.opencontainers.image.authors="jay-dizzale"
 LABEL description="Shared base image for every toolbelt (built locally by run.sh, never pushed)"
 

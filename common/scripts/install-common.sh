@@ -1,4 +1,12 @@
 #!/bin/sh
+# install-common.sh runs a chain of `sh install-X.sh` sub-scripts (each of which already has
+# its own `set -eu`). Without `set -e` here too, a failing apt-get or a failing sub-script
+# doesn't stop this script — it just keeps going, and the real error (e.g. apt-get's
+# "Temporary failure resolving ..." for a transient DNS/proxy blip while fetching `rustup`)
+# scrolls past unnoticed. The build then only fails several steps later, at the Dockerfile's
+# separate `RUN rustup toolchain install` step, with the misleading "rustup: not found" —
+# nowhere near the actual cause. `set -eu` makes it fail loudly at the real failing command.
+set -eu
 . /usr/local/lib/shell/download-utils.sh
 
 # Bootstrap: get ca-certificates so update-ca-certificates is available.
@@ -50,7 +58,10 @@ apt-get install -qqy apt-transport-https \
   zlib1g-dev \
   zsh
 
-localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
+# No -A /usr/share/locale/locale.alias: that file doesn't exist on Ubuntu 26.04's glibc
+# (dropped upstream) — localedef errored out trying to update it. Silently ignored before
+# `set -e` above was added; genuinely unnecessary for generating the locale itself.
+localedef -i en_US -c -f UTF-8 en_US.UTF-8
 
 sh install-gh.sh
 sh install-tea.sh

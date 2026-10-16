@@ -18,6 +18,16 @@ FROM ghcr.io/open-webui/open-webui:${OPEN_WEBUI_VERSION}
 LABEL org.opencontainers.image.authors="jay-dizzale"
 LABEL description="Open WebUI service, preconfigured for Ollama on the Docker host (RAG)"
 
+# Enterprise proxy support for the build — see common/Dockerfile for the full rationale
+# (the implicit "predefined proxy build-arg" mechanism proved unreliable; these explicit
+# ARGs make proxy.env's values reach this file's own RUN steps, e.g. apt-get below, too).
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+
 ## common/entrypoint.sh needs iptables (not in the upstream image) and
 ## setpriv (ships in util-linux, already present).
 RUN apt-get update && apt-get install -y --no-install-recommends iptables \

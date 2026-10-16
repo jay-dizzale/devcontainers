@@ -269,6 +269,32 @@ explicitly allowed, and every request (allowed or denied) is logged.
   proxy is set, `proxy.docker-compose.yml`'s `proxy` service also chains to it at *runtime* via
   a generated `cache_peer` (see `common/proxy/entrypoint.sh`), so a corporate network's proxy
   requirement and the whitelist aren't mutually exclusive.
+  Every Dockerfile that runs a network-touching `RUN` step (`common/Dockerfile` and every
+  `<env>/Dockerfile` except `base-toolbelt`, which has none) declares
+  `ARG HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` + lowercase, right after its `FROM`, even though
+  Docker documents these six exact names as "predefined" build-args that don't need an `ARG`
+  line to reach `RUN`'s environment — that implicit path proved unreliable in practice:
+  `apt-get` inside `install-common.sh` failed installing `rustup` with "Temporary failure
+  resolving ..." because the proxy never actually reached that `RUN`, even though
+  `docker-compose.yml`'s `build.args` (or `launcher.ensure_base_image`'s bare
+  `--build-arg HTTP_PROXY`) correctly carried the value that far. Declaring the `ARG`s
+  explicitly routes it through the ordinary, always-reliable ARG-to-RUN-environment
+  mechanism instead. They're `ARG`, never `ENV` — an `ARG` value never persists into the
+  built image or the running container, so it can't conflict with the *runtime* proxy
+  (`common/base.docker-compose.yml`'s `environment:` block, pointed at the egress whitelist
+  proxy instead — see above).
+- **`common/scripts/install-common.sh` has `set -eu`, like every other `install-*.sh`.**
+  It didn't, until a missing one got root-caused: without `-e`, a failing `apt-get` (or a
+  failing `sh install-X.sh` sub-script — each of those already has its own `set -eu`, but
+  that only aborts *that* sub-script, not `install-common.sh` itself) doesn't stop the
+  script, it just keeps going — the real error scrolls past, and the build only fails
+  several steps later at the Dockerfile's separate `RUN rustup toolchain install`, with the
+  misleading `rustup: not found` (rustup was never actually installed; `apt-get install
+  rustup` had already failed, silently, earlier in `install-common.sh`). `set -eu` makes it
+  fail loudly at the real failing command instead. Turning it on immediately surfaced a
+  second, independent latent bug it had also been masking: `localedef`'s `-A
+  /usr/share/locale/locale.alias` argument errors out on Ubuntu 26.04 (that alias file no
+  longer exists in its glibc) — dropped; generating the locale doesn't need it.
 - **Day-to-day management is just `./run.py [-v /path] [-r] [-d] [-f]`** — bare, no
   subcommand, not raw `docker`. `devtool/cli.py`'s fallthrough (nothing else matched) calls
   straight into `devtool/proxy.py` — a **Python 3, stdlib-only** module (`subprocess`/`curses`;
