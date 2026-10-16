@@ -114,7 +114,9 @@ already up), or press `n` to start a brand-new environment for the current direc
 # 1. Clone and enter the repository
 git clone <this-repo> && cd <this-repo>
 
-# 2. One-time setup — git identity, common/.zshrc, CA bundle, proxy.env, `dev` command
+# 2. Host setup — opens a form (git identity, CA bundle, enterprise proxy
+#    URL/no_proxy); Tab/↑/↓ switch fields, Enter applies, Esc cancels.
+#    Also (re)generates common/.zshrc and the `dev` command.
 ./run.py setup
 
 # 3. Launch — mounts the current directory into /workspace by default
@@ -222,6 +224,15 @@ Open the environment's folder (e.g. `infrastructure-toolbelt/`) in VS Code and c
   is gitignored (it holds your real identity); only the template is
   checked in. Re-run `run.py setup` to change it, or edit `common/.zshrc`
   directly for a one-off tweak.
+- **Enterprise proxy / corporate CA** — `./run.py setup`'s form also takes a CA
+  certificate bundle path (copied into `common/scripts/certs/` and installed into every
+  container on its next build) and a proxy URL + `no_proxy` (written to the gitignored
+  `proxy.env`, used both for the image *build* and, via `common/proxy.docker-compose.yml`,
+  chained into the egress proxy at *runtime* — see `AGENTS.md`'s "Egress proxy and domain
+  whitelist"). Re-running `run.py setup` shows whatever's already configured — pre-filled
+  from `proxy.env` and from the cert file names already in `common/scripts/certs/` — so you
+  can review/adjust it instead of typing it all in again. Rebuild your containers after
+  changing either.
 - **Per-environment shell tweaks** — add a `.zshrc2` (already wired up for `infrastructure-toolbelt`).
 - **Trim it down** — remove environment folders you don't need.
 - **GitHub API rate limit** — optional. Some install scripts fall back to the

@@ -27,7 +27,7 @@ images and the scripts that build them.
 │   ├── cli.py                    # Top-level argument dispatch (port of the old run.sh loop)
 │   ├── launcher.py                # Default picker + stop/list/logs/build-base
 │   ├── proxy.py                  # The two-pane curses app bare `run.py` opens by default
-│   ├── hostsetup.py              # `run.py setup` — one-time host setup (was setup.sh)
+│   ├── hostsetup.py              # `run.py setup` — host setup, a curses form (was setup.sh)
 │   └── docker_utils.py           # Shared `docker` CLI subprocess helpers, stack resolution
 ├── common/                       # Shared base for every environment
 │   ├── Dockerfile                # Shared base image `toolbelt-base:latest` (install-common + Rust), built locally by run.py
@@ -468,6 +468,33 @@ explicitly allowed, and every request (allowed or denied) is logged.
   `launcher.start_and_open_shell` already reconnects by matching the env+workspace labels
   rather than starting a duplicate — the tag only surfaces that existing behavior in the UI
   instead of requiring the user to already know it.
+- **`run.py setup` (`devtool/hostsetup.py`) is a curses form, not a sequence of plain
+  `input()` prompts.** The motivating case is an enterprise proxy: that needs the CA bundle
+  path, the proxy URL, and `no_proxy` all filled in together, and a one-question-at-a-time
+  wizard with no way back to fix an earlier answer made that fiddly, especially since getting
+  any one of the three wrong breaks egress entirely. `hostsetup.run()` collects git
+  name/email, the CA bundle path, and the proxy URL/`no_proxy` through one form
+  (`_setup_wizard`/`_draw_setup_form`) — Tab or `↓` moves to the next field, `↑` to the
+  previous one, Enter applies all of them, Esc cancels with nothing changed. It reuses the
+  Stacks tab's curses chrome instead of duplicating it: `proxy.init_curses_chrome` (color
+  pairs + the shortened Esc delay, factored out of `run_app` for exactly this reuse — also
+  used by `cmd_run`'s `_run_picker`) and the module-level `_draw_box`/`_safe_addnstr`/
+  `_read_key` helpers, imported straight from `devtool/proxy.py`. Only one proxy URL field
+  feeds both `HTTP_PROXY` and `HTTPS_PROXY` in `proxy.env` (an enterprise proxy is almost
+  always the same box for both) — someone who genuinely needs them to differ still edits
+  `proxy.env` by hand afterward, same as before this form existed.
+  Re-running `run.py setup` pre-fills the form from what's already configured — `git config
+  --global`, and `proxy.env`'s own last-written values (not the current shell's environment,
+  which may never have exported them) for the proxy URL/`no_proxy` — so it reads as "review
+  and edit", not "answer everything again from scratch". The CA cert field is the one
+  exception: it always starts blank, because the bundle is copied into
+  `common/scripts/certs/` on apply (`_apply_ca_bundle`) and nothing records the original host
+  path to recall it from. `_installed_certs()` lists whatever's already in that directory as
+  a dim hint next to the field instead, so "a cert is already configured" is still visible —
+  leaving the field blank keeps the existing bundle(s) untouched. All the actual side effects
+  (writing `proxy.env`, copying the cert, regenerating `common/.zshrc`, appending the `dev()`
+  function to `~/.zshrc`) happen only after the form returns a confirmed dict — never from
+  inside the curses loop itself, same separation `cmd_run` uses for its own modal.
 - **`setup`'s own leading `-v` must be extracted *before* checking whether the next token is
   `setup`.** The `dev()` shell function `run.py setup` installs always runs
   `run.py -v "$(pwd)" "$@"` — a leading `-v <path>` ahead of whatever was actually typed.
@@ -482,7 +509,10 @@ explicitly allowed, and every request (allowed or denied) is logged.
 ## Commands
 
 ```sh
-# One-time host setup (git identity, CA bundle, proxy.env, `dev` shell function)
+# Host setup — a curses form (git identity, CA bundle, proxy URL, no_proxy);
+# Tab/↑/↓ switch fields, Enter applies, Esc cancels. Re-running it pre-fills
+# the form from git config/proxy.env. Also regenerates common/.zshrc and the
+# `dev` shell function every time, no prompt needed for those.
 ./run.py setup
 
 # The entire tool — no subcommand. Two-pane TUI: Stacks (left, always visible —

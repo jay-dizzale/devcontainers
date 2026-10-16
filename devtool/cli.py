@@ -54,8 +54,12 @@ Usage:
       the URL for a service. Needs an interactive terminal.
 
   ./run.py setup
-      One-time host setup: git identity, container shell config, CA
-      certificate bundle, proxy settings, and the `dev` shell function.
+      Host setup: a curses form for git identity, CA certificate bundle,
+      and enterprise proxy settings (proxy URL, no_proxy) — Tab/↑/↓ move
+      freely between fields, Enter applies all of them, Esc cancels with
+      no changes. Re-running it pre-fills the form with whatever is
+      already configured. Also (re)generates the container shell config
+      and the `dev` shell function, every time, no prompt needed.
 
   ./run.py stop [-v /path/to/mount]
       Stop & delete stacks mounted from that directory (default: cwd).

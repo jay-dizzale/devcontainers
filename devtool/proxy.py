@@ -1410,7 +1410,10 @@ def _read_key(stdscr):
     return _ARROW_BY_FINAL_BYTE.get(k3, key)
 
 
-def run_app(stdscr, cid, env, project, workspace, target_dir):
+def init_curses_chrome(stdscr, timeout_ms=200):
+    """Shared by every curses entry point (run_app, _run_picker, hostsetup's setup wizard):
+    hide the cursor, shorten the post-Esc wait, and set up the four color pairs every modal's
+    drawing code assumes exist (falling back to no color on a terminal that can't do it)."""
     curses.curs_set(0)
     # ncurses waits ESCDELAY (default 1s) after a bare Esc for a possible escape sequence,
     # which made Esc at every prompt/modal feel laggy. Arrow keys don't depend on it: their
@@ -1426,7 +1429,11 @@ def run_app(stdscr, cid, env, project, workspace, target_dir):
         curses.init_pair(4, curses.COLOR_YELLOW, -1)   # accents: markers, wildcards, call-to-action rows
     except curses.error:
         pass  # terminal without color support — fall back to no color, still usable
-    stdscr.timeout(200)
+    stdscr.timeout(timeout_ms)
+
+
+def run_app(stdscr, cid, env, project, workspace, target_dir):
+    init_curses_chrome(stdscr)
 
     app = OverviewApp(cid, env, project, workspace, target_dir)
     app.refresh()
@@ -1562,19 +1569,7 @@ def cmd_run(target, rebuild=False, debug=False):
 def _run_picker(stdscr, target_dir):
     """curses.wrapper entry point for cmd_run: same color/escdelay setup as run_app, then
     straight into the new-stack modal — no Stacks/Proxy panes drawn at all."""
-    curses.curs_set(0)
-    if hasattr(curses, "set_escdelay"):  # Python 3.9+
-        curses.set_escdelay(25)
-    try:
-        curses.start_color()
-        curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_GREEN, -1)
-        curses.init_pair(2, curses.COLOR_RED, -1)
-        curses.init_pair(3, curses.COLOR_CYAN, -1)
-        curses.init_pair(4, curses.COLOR_YELLOW, -1)
-    except curses.error:
-        pass
-    stdscr.timeout(100)
+    init_curses_chrome(stdscr, timeout_ms=100)
 
     app = OverviewApp(None, None, None, None, target_dir)
     choice = app._new_stack_modal(stdscr)
