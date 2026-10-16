@@ -9,9 +9,10 @@ A **collection of DevContainer environments**, not an application. Each top-leve
 folder ending in `-toolbelt` (`base-toolbelt/`, `infrastructure-toolbelt/`,
 `java-toolbelt/`, `latex-toolbelt/`, `pico-toolbelt/`, `web-toolbelt/`) is one
 containerized development environment. Folders ending in `-service`
-(`open-webui-service/`) are long-running services instead — see "Services" below. All of them layer on a shared base
-defined in `common/`. The goal is reproducible toolchains that developers
-launch via `run.py` or VS Code Dev Containers.
+(`open-webui-service/`) are long-running services instead — see "Services" below. Every
+toolbelt layers on a shared base defined in `common/`; a service usually does too, though
+`open-webui-service` is a deliberate exception (see "Services" below). The goal is
+reproducible toolchains that developers launch via `run.py` or VS Code Dev Containers.
 
 There is **no application code to run or test here** — the "product" is the Docker
 images and the scripts that build them.
@@ -130,11 +131,23 @@ images and the scripts that build them.
 
 ## Services (`*-service/`)
 
-A **service** is a long-running app built on `toolbelt-base`, not a devcontainer:
-no `/workspace` mount, no host credentials mounted, no `devcontainer.json`, no shell
-opened by `run.py`. Currently only `open-webui-service/` (Open WebUI, preconfigured
-for Ollama on the Docker host at `host.docker.internal:11434`, with Ollama embeddings
-for RAG).
+A **service** is a long-running app, not a devcontainer: no `/workspace` mount, no
+host credentials mounted, no `devcontainer.json`, no shell opened by `run.py`.
+Currently only `open-webui-service/` (Open WebUI, preconfigured for Ollama on the
+Docker host at `host.docker.internal:11434`, with Ollama embeddings for RAG).
+
+- **Unlike a toolbelt, a service's Dockerfile doesn't have to build on
+  `toolbelt-base`** — `open-webui-service/Dockerfile` is `FROM
+  ghcr.io/open-webui/open-webui:${OPEN_WEBUI_VERSION}` (the upstream project's own
+  published image, pinned to a specific release — never `main`/`latest`, which float
+  to HEAD) instead, since that image already bundles everything the app needs and
+  building our own Python environment on `toolbelt-base` just to pip-install the same
+  package was redundant. It still gets the same egress-enforcing entrypoint as every
+  other environment (`COPY common/entrypoint.sh` + a `useradd`'d uid-1000 `ubuntu`
+  user, since the upstream image otherwise runs as root and has no such account) —
+  it's just copied in directly rather than inherited from `toolbelt-base`. Because it
+  doesn't depend on `toolbelt-base`, `launcher.start_service` does not call
+  `ensure_base_image` the way `start_and_open_shell` does for every toolbelt.
 
 - **Top-level `<name>-service/` folders, not nested under `services/`** — the
   compose path-resolution gotcha (see below) means `common/proxy.docker-compose.yml`'s
@@ -145,10 +158,12 @@ for RAG).
 - **Does not extend `common/base.docker-compose.yml`** (that's the devcontainer base,
   with its workspace and credential mounts). It copies only the egress bits —
   `user: root`, `cap_add: NET_ADMIN`, `depends_on: proxy: service_healthy`, the
-  proxy env vars, `extra_hosts` — so the base image's `common/entrypoint.sh` still
-  sets the iptables allowlist and the proxy sidecar is merged in exactly as for a
-  toolbelt (via `COMPOSE_FILE` in `launcher.start_service`). Its traffic shows up in
-  the TUI's proxy tabs like any stack's.
+  proxy env vars, `extra_hosts` — so `common/entrypoint.sh` (inherited from
+  `toolbelt-base`, or copied directly into the Dockerfile for a service that isn't
+  built on it — see above) still sets the iptables allowlist, and the proxy sidecar
+  is merged in exactly as for a toolbelt (via `COMPOSE_FILE` in
+  `launcher.start_service`). Its traffic shows up in the TUI's proxy tabs like any
+  stack's.
 - **Labels**: `devcontainer.env=<dir name>` (so `list`/`stop`/the Stacks pane see it,
   and the Global Whitelist's `s` option targets `whitelist.d/<dir name>.txt`) plus
   `devcontainer.kind=service`. Single instance: fixed project name (dir name minus

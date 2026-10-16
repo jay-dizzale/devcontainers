@@ -22,8 +22,15 @@ services:
         http_proxy: ${http_proxy:-}
         https_proxy: ${https_proxy:-}
         no_proxy: ${no_proxy:-}
-        OPEN_WEBUI_VERSION: ${OPEN_WEBUI_VERSION:-}
-    image: toolbelt-open-webui:latest
+        # Pins the FROM tag in the Dockerfile (ghcr.io/open-webui/open-webui:<tag>)
+        # to a specific release, never `main`/`latest` (those float to
+        # whatever's on HEAD). The `-slim` suffix is the lightweight variant
+        # (no local embedding/Whisper/document-parsing extras) — see the
+        # Dockerfile for why that's a pure win for this setup. Bump
+        # deliberately, not as a side effect of an unrelated change — see
+        # AGENTS.md "Do not bump pinned versions unprompted".
+        OPEN_WEBUI_VERSION: ${OPEN_WEBUI_VERSION:-0.11.4-slim}
+    image: open-webui-service:latest
     container_name: open-webui
     init: true
     # root + NET_ADMIN only for common/entrypoint.sh's iptables allowlist; it
@@ -59,6 +66,10 @@ services:
       - RAG_EMBEDDING_ENGINE=ollama
       - RAG_EMBEDDING_MODEL=nomic-embed-text
       - DATA_DIR=/data
+      # Upstream's start.sh otherwise generates/stores this relative to
+      # /app/backend — ephemeral storage, so everyone would be logged out on
+      # every container recreate. Keep it on the data volume instead.
+      - WEBUI_SECRET_KEY_FILE=/data/.webui_secret_key
       # No outbound calls that the whitelist would only block anyway.
       - ENABLE_OPENAI_API=false
       - ENABLE_VERSION_UPDATE_CHECK=false

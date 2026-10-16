@@ -306,8 +306,11 @@ def start_service(compose_dir, rebuild, debug):
     external volumes precisely so `down -v` (run.py stop, the TUI's 'd') can't delete it."""
     project = service_project_name(compose_dir)
     print(f"📂 Working in: {compose_dir}")
+    # Unlike a toolbelt, a service doesn't necessarily build on toolbelt-base
+    # (open-webui-service builds directly on the upstream Open WebUI image —
+    # see AGENTS.md "Services") — so, unlike start_and_open_shell, this
+    # doesn't call ensure_base_image.
     env, compose = _compose_runner(compose_dir, project, [PROXY_COMPOSE])
-    ensure_base_image(rebuild, debug, env)
 
     cfg = compose("config", "--format", "json", capture_output=True, text=True)
     if cfg.returncode != 0:

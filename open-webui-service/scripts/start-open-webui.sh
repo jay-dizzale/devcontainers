@@ -2,23 +2,21 @@
 # start-open-webui.sh
 # Container command for open-webui-service (installed as
 # /usr/local/bin/start-open-webui). Checks that Ollama on the Docker host is
-# reachable through the egress proxy, then runs Open WebUI in the
-# foreground (its output is the container's log — `docker logs`). If Open
-# WebUI exits, the container is kept alive so a shell can still be opened
-# to investigate (docker exec -it -u ubuntu open-webui sh); restart it by
-# hand with `start-open-webui`.
+# reachable through the egress proxy, then hands off to the upstream
+# image's own backend/start.sh in the foreground (its output is the
+# container's log — `docker logs`). If Open WebUI exits, the container is
+# kept alive so a shell can still be opened to investigate
+# (docker exec -it -u ubuntu open-webui sh); restart it by hand with
+# `start-open-webui`.
 #
 # Configuration comes from open-webui-service/docker-compose.yml's
-# environment block (OLLAMA_BASE_URL, RAG_EMBEDDING_*, DATA_DIR, ...).
+# environment block (OLLAMA_BASE_URL, RAG_EMBEDDING_*, DATA_DIR,
+# WEBUI_SECRET_KEY_FILE, ...). WEBUI_SECRET_KEY_FILE is pointed at DATA_DIR
+# so the generated secret persists with the data volume — otherwise
+# start.sh's default (relative to /app/backend) would be lost, and
+# everyone logged out, on every container recreate.
 
 set -u
-
-DATA_DIR="${DATA_DIR:-/data}"
-mkdir -p "${DATA_DIR}"
-# `open-webui serve` keeps its generated WEBUI_SECRET_KEY in
-# ./.webui_secret_key — run from DATA_DIR so it persists with the data
-# (otherwise every container recreate logs everyone out).
-cd "${DATA_DIR}" || exit 1
 
 echo "open-webui: checking Ollama at ${OLLAMA_BASE_URL} ..."
 if tags="$(curl -fsS -m 10 "${OLLAMA_BASE_URL}/api/tags")"; then
@@ -34,6 +32,6 @@ else
     echo "open-webui:          Starting anyway — it will pick Ollama up once it's running." >&2
 fi
 
-open-webui serve --host 0.0.0.0 --port 8080
+bash /app/backend/start.sh
 echo "open-webui: exited with status $? — container kept alive; restart with 'start-open-webui'." >&2
 exec sleep infinity
