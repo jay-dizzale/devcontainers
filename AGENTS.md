@@ -269,7 +269,7 @@ explicitly allowed, and every request (allowed or denied) is logged.
   proxy is set, `proxy.docker-compose.yml`'s `proxy` service also chains to it at *runtime* via
   a generated `cache_peer` (see `common/proxy/entrypoint.sh`), so a corporate network's proxy
   requirement and the whitelist aren't mutually exclusive.
-- **Day-to-day management is just `./run.py [-v /path] [-r] [--debug] [-f]`** — bare, no
+- **Day-to-day management is just `./run.py [-v /path] [-r] [-d] [-f]`** — bare, no
   subcommand, not raw `docker`. `devtool/cli.py`'s fallthrough (nothing else matched) calls
   straight into `devtool/proxy.py` — a **Python 3, stdlib-only** module (`subprocess`/`curses`;
   no `pip install`, no `docker` SDK — every Docker call shells out to the `docker` CLI). This
@@ -524,17 +524,17 @@ explicitly allowed, and every request (allowed or denied) is logged.
 ./run.py
 ./run.py -v /path/to/your/project    # mount a different directory into /workspace
 ./run.py -r                          # force a from-scratch rebuild when you 'o'/'n' an environment
-./run.py --debug                     # verbose docker build output (--progress=plain)
+./run.py -d                          # (or --debug) verbose docker build output (--progress=plain)
 ./run.py -f                          # passive — redraws the Domain Statistics table every 2s, no input
 
 # Skip the TUI and go straight to the "pick a toolbelt/service" modal ('n'
 # on the Stacks tab), then build/start it immediately. Needs a real terminal.
 ./run.py run
 ./run.py run -v /path/to/your/project
-./run.py run -r --debug
+./run.py run -r -d                   # -d: full, verbose docker build log instead of the collapsed output
 
 # Build only the shared base image (toolbelt-base:latest), then exit
-./run.py build-base [-r]
+./run.py build-base [-r] [-d]
 
 # List every devcontainer stack (project, env, service, status, workspace)
 ./run.py list

@@ -17,7 +17,7 @@ HELP_TEXT = """\
 run.py — Interactive launcher for docker-compose devcontainer stacks and services.
 
 Usage:
-  ./run.py [-v /path/to/mount] [-r] [--debug] [-f]
+  ./run.py [-v /path/to/mount] [-r] [-d] [-f]
       Opens a two-pane app — Stacks on the left, Proxy settings on the
       right (Tab/←/→ move between the 5 positions, 1-4 jump straight to a
       proxy sub-tab, q/Ctrl-C quit). The title bar shows whether Docker
@@ -42,16 +42,17 @@ Usage:
         3 Custom WL      — your gitignored local.txt. `n` add, `b` remove.
         4 Access log     — the raw log for the active stack, following
                        until you scroll up (↑/↓); `c` clears it.
-      -r/--debug apply to whatever you start from the app. -f: passive —
+      -r/-d apply to whatever you start from the app. -f: passive —
       redraws the Domain Stats table every 2s, no key handling. Piped/
       non-terminal output (and no -f): one-shot Domain Stats snapshot plus
       an "add a domain" prompt (also always local.txt).
 
-  ./run.py run [-v /path/to/mount] [-r] [--debug]
+  ./run.py run [-v /path/to/mount] [-r] [-d]
       Skip the Stacks/Proxy overview and go straight to the "pick a
       toolbelt or service" modal (same picker as the Stacks tab's `n`),
       then build/start it immediately — open a shell for a toolbelt, print
-      the URL for a service. Needs an interactive terminal.
+      the URL for a service. Needs an interactive terminal. -d shows the
+      full, verbose docker build log instead of the collapsed output.
 
   ./run.py setup
       Host setup: a curses form for git identity, CA certificate bundle,
@@ -76,7 +77,7 @@ Usage:
       the stack mounted from that directory (default: cwd). -f follows it
       live; prompts if more than one stack is running from that directory.
 
-  ./run.py build-base [-r] [--debug]
+  ./run.py build-base [-r] [-d]
       Build the shared base image (toolbelt-base:latest) and exit. Only
       rebuilds if common/ changed since it was last built; -r forces a
       from-scratch rebuild. Honours RUST_VERSION from the environment.
@@ -88,7 +89,7 @@ Options:
   -v, --volume <path>   Directory to mount at /workspace (default: cwd).
   -r, --rebuild         Force a from-scratch rebuild (--no-cache).
   -f, --follow          Passive/follow mode instead of the interactive app or a one-shot view.
-  --debug               Verbose docker build output (--progress=plain).
+  -d, --debug           Verbose docker build output (--progress=plain).
 
 If installed via `run.py setup`, all of the above also work as `dev ...`
 (e.g. `dev stop --all`, `dev list`).
@@ -146,7 +147,7 @@ def _run_generic(args, invocation_dir):
             rebuild = True; i += 1
         elif tok in ("-f", "--follow"):
             follow = True; i += 1
-        elif tok == "--debug":
+        elif tok in ("-d", "--debug"):
             debug = True; i += 1
         else:
             die(f"Unknown argument: {tok}")
