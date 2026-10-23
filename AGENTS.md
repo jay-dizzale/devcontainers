@@ -527,6 +527,9 @@ explicitly allowed, and every request (allowed or denied) is logged.
 # List every devcontainer stack (project, env, service, status, workspace)
 ./run.py list
 
+# Print the directory containing run.py (e.g. `cd "$(dev dir)"`)
+./run.py dir
+
 # View/tail the egress proxy's access log for the stack mounted from a directory
 ./run.py logs
 ./run.py logs -f                     # follow live

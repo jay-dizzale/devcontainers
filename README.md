@@ -178,6 +178,14 @@ preselected — confirming it just reconnects you instead of starting a duplicat
 Shows every devcontainer stack (project, env, service, status, mounted workspace
 directory), regardless of which directory it was started from.
 
+### Find the repo
+
+```sh
+./run.py dir
+```
+
+Prints the directory containing `run.py` — handy as `cd "$(dev dir)"` from anywhere.
+
 ### View the egress proxy's access log
 
 ```sh

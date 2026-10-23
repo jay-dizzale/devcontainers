@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 from . import hostsetup, launcher, proxy
-from .docker_utils import die
+from .docker_utils import REPO_ROOT, die
 
 HELP_TEXT = """\
 run.py — Interactive launcher for docker-compose devcontainer stacks.
@@ -71,6 +71,9 @@ Usage:
   ./run.py list
       List every devcontainer stack (project, env, service, status, workspace).
 
+  ./run.py dir
+      Print the directory containing run.py (e.g. `cd "$(dev dir)"`).
+
   ./run.py logs [-v /path/to/mount] [-f]
       Show the whitelist proxy's access log (allowed + denied domains) for
       the stack mounted from that directory (default: cwd). -f follows it
@@ -118,7 +121,7 @@ def main(argv):
 
 
 def _run_generic(args, invocation_dir):
-    stop = stop_all = do_list = do_logs = do_run = follow = rebuild = debug = build_base = False
+    stop = stop_all = do_list = do_dir = do_logs = do_run = follow = rebuild = debug = build_base = False
     volume_in = invocation_dir
 
     i = 0
@@ -131,6 +134,8 @@ def _run_generic(args, invocation_dir):
             stop = True; i += 1
         elif tok == "list":
             do_list = True; i += 1
+        elif tok == "dir":
+            do_dir = True; i += 1
         elif tok == "logs":
             do_logs = True; i += 1
         elif tok == "run":
@@ -158,6 +163,9 @@ def _run_generic(args, invocation_dir):
 
     if do_list:
         launcher.cmd_list()
+        return 0
+    if do_dir:
+        print(REPO_ROOT)
         return 0
     if do_logs:
         launcher.cmd_logs(volume, follow)
