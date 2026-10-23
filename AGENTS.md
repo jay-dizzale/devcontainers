@@ -312,7 +312,7 @@ explicitly allowed, and every request (allowed or denied) is logged.
     `devcontainer` CLI it shells out to) when IT builds/starts the container itself, e.g.
     "Reopen in Container", never by `docker compose up` through run.py — so it's a reliable
     "this stack is also open in VS Code" signal, not a guess from the project name or workspace
-    path (`list_all_stacks`/`_card_bottom_border`). Selection is shown by shape, not color (color is the
+    path (`list_all_stacks`/`_card_border`). Selection is shown by shape, not color (color is the
     container state): the selected card gets a heavy bold border (`┏━┓`), rather than reversing the
     content too, which looked noisy. The list always has one
     extra trailing "+ New stack" card past the real stacks, so starting a new one is just
@@ -385,7 +385,8 @@ explicitly allowed, and every request (allowed or denied) is logged.
     - **Custom Whitelist**: every domain in the gitignored `whitelist.d/local.txt` only
       (`read_custom_whitelist_entries`) — no group headers needed, since there's only ever this
       one source file. `n` adds straight to local.txt (`do_allow_domain`, no second prompt —
-      there's only one possible target), `b` removes the selected entry. This tab (and Domain
+      there's only one possible target), `b` removes the selected entry from local.txt only
+      (never from a tracked file that happens to list the same domain). This tab (and Domain
       Statistics' `a`) exist specifically so a personal/local domain addition can never again
       land in a tracked file by accident and get committed — that's exactly what happened once
       (a personal domain landed in `00-common.txt` via this tool and got pushed), which is why
@@ -409,14 +410,16 @@ explicitly allowed, and every request (allowed or denied) is logged.
     `_curses.error: addnwstr() returned ERR`). `devtool/proxy.py`'s `_safe_addnstr(stdscr, y,
     x, s, n, attr)` module-level helper checks `y`/`x` against `stdscr.getmaxyx()` first and
     no-ops instead of raising; every `addnstr` call in the module goes through it.
-  - **Curses + bare `print()` don't mix**: `do_allow_domain`/`do_allow_domain_global`/
-    `do_block_domain`/`restart_running_proxies` `print()` status lines meant for the plain-text
-    fallback paths (piped snapshot, `-f`). Called directly from inside the curses app those
-    prints bypass curses' own buffer and write straight to the real terminal underneath the
-    alternate screen — tested: this visibly corrupted the display after pressing `a`/`b`/`n`
-    until the next full redraw. Every curses call site wraps these calls in `_quiet_stdout()`
-    (`contextlib.redirect_stdout` to a throwaway `io.StringIO()`) and shows the same
-    information via `self.message` instead.
+  - **Curses + bare `print()` don't mix**: a `print()` from inside the curses app bypasses
+    curses' own buffer and writes straight to the real terminal underneath the alternate
+    screen — tested: this visibly corrupted the display until the next full redraw. So
+    `do_allow_domain`/`do_allow_domain_global`/`do_block_domain` (and
+    `restart_running_proxies`, which they call) never print: they *return* a one-line status
+    message, which the curses app shows in its footer (`OverviewApp._show_result`) and the
+    piped snapshot prints. They also never `die()` — an error is just another message. The
+    one remaining printing call made from inside curses, `launcher.teardown_stack`, is
+    wrapped in `_quiet_stdout()` (`contextlib.redirect_stdout` to a throwaway
+    `io.StringIO()`).
   - **Colors**: four `curses` color pairs (`run_app`) — green/red for status/verdict
     (RUNNING/ALLOWED vs. STOPPED/BLOCKED/DENIED), cyan for structural chrome (titles, pane
     labels, tab bar, dividers, column headers), yellow for accents (the `➤` marker, "+ New

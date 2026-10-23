@@ -24,7 +24,7 @@ from pathlib import Path
 
 from . import launcher
 from .docker_utils import (
-    CONFIG_FILES, ENV, ID, LOCAL_FOLDER, PORTS, PROJECT, REPO_ROOT, STATE, WORKDIR, WORKSPACE,
+    CONFIG_FILES, ENV, ID, LOCAL_FOLDER, PORTS, PROJECT, REPO_ROOT, STATE, WORKSPACE,
     die, docker, docker_engine_version, docker_out, proxy_cid_for_project, ps_rows, resolve_stack,
 )
 
@@ -110,26 +110,22 @@ def _format_bind(bind):
 
 def restart_running_proxies():
     """Restarts every currently-running proxy container so a whitelist edit applies
-    immediately. The `proxy` service carries no `devcontainer.env` label of its own (only
-    `dev` does), so this filters on the compose service name, then double-checks each match's
-    config-files label actually includes our proxy.docker-compose.yml, so an unrelated
-    project's own "proxy" service (if one somehow exists on the host) is never touched."""
+    immediately, and returns a short summary for the caller's status line. The `proxy`
+    service carries no `devcontainer.env` label of its own (only `dev` does), so this filters
+    on the compose service name, then double-checks each match's config-files label actually
+    includes our proxy.docker-compose.yml, so an unrelated project's own "proxy" service (if
+    one somehow exists on the host) is never touched."""
     running = [
-        (cid, workdir)
-        for cid, cfg, workdir in ps_rows("label=com.docker.compose.service=proxy", fields=[ID, CONFIG_FILES, WORKDIR], all_=False)
+        cid
+        for cid, cfg in ps_rows("label=com.docker.compose.service=proxy", fields=[ID, CONFIG_FILES], all_=False)
         if "common/proxy.docker-compose.yml" in cfg
     ]
     if not running:
-        print("ℹ️  No running proxy containers right now — the change applies the next time a stack starts.")
-        return
-
-    print("🔁 Restarting running proxy container(s) so the change takes effect ...")
-    for cid, workdir in running:
-        label = Path(workdir).name if workdir else "?"
-        if docker("restart", cid).returncode == 0:
-            print(f"   ✅ {label}")
-        else:
-            print(f"   ⚠️  failed to restart {label}", file=sys.stderr)
+        return "applies the next time a stack starts"
+    failed = sum(docker("restart", cid).returncode != 0 for cid in running)
+    if failed:
+        return f"⚠️  {failed} of {len(running)} proxy restart(s) failed"
+    return f"{len(running)} running proxy(ies) restarted"
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +140,11 @@ def read_domains(path):
     return [s for s in (line.strip() for line in path.read_text().splitlines()) if s and not s.startswith("#")]
 
 
+def tracked_whitelist_files():
+    """Every whitelist.d file except the gitignored local.txt."""
+    return [f for f in whitelist_files() if f != WHITELIST_LOCAL_FILE]
+
+
 def read_global_whitelist_entries():
     """Entries from the TRACKED whitelist.d files only (00-common.txt + per-env
     *-toolbelt.txt) — excludes the gitignored local.txt. Backs the Global Whitelist tab, which
@@ -152,9 +153,7 @@ def read_global_whitelist_entries():
     file) so the tab can draw them as two visually separated sections — sorting puts every
     "common" entry before any "specific" one, domain-alphabetical within each group."""
     entries = []
-    for f in whitelist_files():
-        if f == WHITELIST_LOCAL_FILE:
-            continue
+    for f in tracked_whitelist_files():
         group = "common" if f.name == "00-common.txt" else "specific"
         for domain in read_domains(f):
             entries.append({"domain": domain, "file": f.name, "wildcard": domain.startswith("."), "group": group})
@@ -173,28 +172,28 @@ def read_custom_whitelist_entries():
     ]
 
 
-def _files_listing(domain):
-    return [f for f in whitelist_files() if domain in read_domains(f)]
+def _files_listing(domain, files=None):
+    return [f for f in (whitelist_files() if files is None else files) if domain in read_domains(f)]
 
 
-def _write_new_domain(target, domain):
+# do_allow_domain/do_allow_domain_global/do_block_domain all return a one-line status message
+# rather than printing it: the curses app shows it in its footer (a bare print() there would
+# write underneath curses' alternate screen and corrupt the display), run_snapshot prints it.
+def _add_domain(target, domain, note):
     hits = _files_listing(domain)
     if hits:
-        names = " ".join(f.name for f in hits)
-        print(f"ℹ️  '{domain}' is already whitelisted (in {names}).")
-        return
+        return f"ℹ️  '{domain}' is already whitelisted (in {' '.join(f.name for f in hits)})."
     with target.open("a") as fh:
         fh.write(domain + "\n")
-    print(f"✅ Added '{domain}' to {target.name}.")
-    restart_running_proxies()
+    return f"✅ Added '{domain}' to {target.name} ({note}) — {restart_running_proxies()}."
 
 
 def do_allow_domain(domain):
     """Local/personal only — always writes to the gitignored WHITELIST_LOCAL_FILE. Used by the
-    Domain Statistics tab's quick 'allow' action and the Custom Whitelist tab's 'n' — see
-    WHITELIST_LOCAL_FILE's module-level comment for why this tool never writes to a tracked
-    whitelist.d file through either of those."""
-    _write_new_domain(WHITELIST_LOCAL_FILE, domain)
+    Domain Statistics tab's quick 'allow' action, the Custom Whitelist tab's 'n', and the
+    plain-text snapshot — see WHITELIST_LOCAL_FILE's module-level comment for why this tool
+    never writes to a tracked whitelist.d file through any of those."""
+    return _add_domain(WHITELIST_LOCAL_FILE, domain, "not tracked by git")
 
 
 def do_allow_domain_global(domain, env=None):
@@ -202,36 +201,25 @@ def do_allow_domain_global(domain, env=None):
     action calls this, after asking whether the domain belongs in the shared 00-common.txt or
     this stack's own <env>-toolbelt.txt. Never used for a quick/local allow (do_allow_domain
     above is for that)."""
-    if env:
-        target = WHITELIST_DIR / f"{env}.txt"
-        if not target.exists():
-            die(f"No whitelist file for '{env}' — expected {target} (name matches the toolbelt directory, e.g. java-toolbelt)")
-    else:
-        target = WHITELIST_DIR / "00-common.txt"
-    _write_new_domain(target, domain)
+    target = WHITELIST_DIR / (f"{env}.txt" if env else "00-common.txt")
+    if not target.exists():
+        return f"⚠️  No whitelist file for '{env}' — expected {target.name} (named after the toolbelt directory)."
+    return _add_domain(target, domain, "tracked — remember to commit it")
 
 
-def do_block_domain(domain):
-    """Removes a domain from EVERY whitelist.d/*.txt file that lists it exactly (it can be
-    covered by more than one — e.g. a shared Apache mirror both java-toolbelt.txt and
-    infrastructure-toolbelt.txt list). No-op, clearly reported, if the domain isn't literally
-    listed anywhere — e.g. it's only reachable via a broader pattern like the leading-dot
-    .amazonaws.com wildcard, which has to be edited by hand."""
-    hits = _files_listing(domain)
+def do_block_domain(domain, files=None):
+    """Removes a domain from every one of `files` (default: all whitelist.d files) that lists
+    it exactly — it can be covered by more than one, e.g. a shared Apache mirror both
+    java-toolbelt.txt and infrastructure-toolbelt.txt list. No-op, clearly reported, if the
+    domain isn't literally listed anywhere — e.g. it's only reachable via a broader pattern
+    like the leading-dot .amazonaws.com wildcard, which has to be edited by hand."""
+    hits = _files_listing(domain, files)
     if not hits:
-        print(f"⚠️  '{domain}' isn't literally listed in any whitelist.d file — it's likely allowed by a")
-        print("   broader pattern (e.g. a leading-dot wildcard like .amazonaws.com); edit that by hand.")
-        return False
-
+        return f"⚠️  '{domain}' isn't a literal whitelist entry — likely covered by a wildcard; edit that by hand."
     for f in hits:
-        lines = f.read_text().splitlines(keepends=True)
-        kept = [ln for ln in lines if ln.rstrip("\n") != domain]
+        kept = [ln for ln in f.read_text().splitlines(keepends=True) if ln.rstrip("\n") != domain]
         f.write_text("".join(kept))
-
-    names = " ".join(f.name for f in hits)
-    print(f"🚫 Removed '{domain}' from: {names}")
-    restart_running_proxies()
-    return True
+    return f"🚫 Removed '{domain}' from {' '.join(f.name for f in hits)} — {restart_running_proxies()}."
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +315,7 @@ def run_snapshot(cid, env, project, workspace):
     except EOFError:
         new_domain = ""
     if new_domain:
-        do_allow_domain(new_domain)
+        print(do_allow_domain(new_domain))
 
 
 def run_follow(cid, env, project, workspace):
@@ -353,17 +341,18 @@ TAB_STACKS, TAB_DOMAINS, TAB_PORTS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG = range(6
 # — see read_global_whitelist_entries/read_custom_whitelist_entries and
 # do_allow_domain/do_allow_domain_global.
 PROXY_TABS = [TAB_PORTS, TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM, TAB_LOG]
+ALL_TABS = [TAB_STACKS, *PROXY_TABS]
+SELECTABLE_TABS = [TAB_STACKS, TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM]  # ↑/↓ move a row selection
 PROXY_TAB_TITLES = [" 1:Ports ", " 2:Domain Stats ", " 3:Global WL ", " 4:Custom WL ", " 5:Access log "]
 
 
 @contextlib.contextmanager
 def _quiet_stdout():
-    """do_allow_domain/do_block_domain print status lines meant for the plain-text fallback
-    paths (run_snapshot, run_follow). Inside the curses app those prints bypass
-    curses' own buffer and go straight to the real terminal underneath the alternate
-    screen, corrupting the display until torn down and redrawn — confirmed: pressing
-    a/b/n visibly scrambled the screen. The curses call sites already surface the same
-    information via self.message, so stdout is simply discarded here."""
+    """For launcher calls that print progress meant for a plain terminal (teardown_stack).
+    Inside the curses app those prints bypass curses' own buffer and go straight to the real
+    terminal underneath the alternate screen, corrupting the display until the next full
+    redraw — confirmed: it visibly scrambled the screen. The curses call site surfaces the
+    outcome itself, so stdout is simply discarded here."""
     with contextlib.redirect_stdout(io.StringIO()):
         yield
 
@@ -416,13 +405,13 @@ class OverviewApp:
         self.target_dir = target_dir  # fixed: where 'n' (new stack) builds/starts into
         self.focus = "stacks"         # "stacks" (left pane) or "proxy" (right pane)
         self.proxy_tab = TAB_PORTS    # which sub-tab the right pane currently shows
-        self.idx = [0, 0, 0, 0, 0, 0]  # selected row, per tab (log tab unused — it scrolls)
-        self.scroll = [0, 0, 0, 0, 0]  # stacks/domains/ports/whitelist/custom: first visible row (viewport top)
+        self.idx = dict.fromkeys(ALL_TABS, 0)     # selected row, per tab (Ports/log unused)
+        self.scroll = dict.fromkeys(ALL_TABS, 0)  # first visible row (viewport top), per tab
         self.log_offset = 0           # log tab: 0 = pinned to newest ("following")
-        self.rows = [[], [], [], [], [], []]
+        self.rows = {tab: [] for tab in ALL_TABS}
         self.message = ""
         self.last_refresh = 0.0
-        self.pending_action = None    # set by 'o' (open shell) — breaks the main loop to act on
+        self.pending_action = None    # (compose_dir, folder) set by 'o'/'n' — breaks the main loop to act on
         self.docker_version = None    # Docker engine version, None = daemon not reachable (title bar)
 
     def current_tab(self):
@@ -457,17 +446,14 @@ class OverviewApp:
         self.rows[TAB_WHITELIST] = read_global_whitelist_entries()
         self.rows[TAB_CUSTOM] = read_custom_whitelist_entries()
         self.last_refresh = time.time()
-        # TAB_PORTS has no rows of its own — it just reads whichever stack is selected in
-        # TAB_STACKS (see _draw_ports_tab), so there's nothing to clamp here.
-        for i in (TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM):
-            if self.rows[i]:
-                self.idx[i] = min(self.idx[i], len(self.rows[i]) - 1)
-            else:
-                self.idx[i] = 0
-        # Stacks: +1 slot for the trailing "+ New stack" row, which always exists even with
-        # zero real stacks — clamping to len(rows) - 1 like the other tabs would make it
-        # unreachable.
-        self.idx[TAB_STACKS] = max(0, min(self.idx[TAB_STACKS], len(self.rows[TAB_STACKS])))
+        for tab in SELECTABLE_TABS:
+            self._select(tab, self.idx[tab])
+
+    def _select(self, tab, i):
+        """Set tab's selection to `i`, clamped to its rows. Stacks has one extra slot for the
+        trailing "+ New stack" row, which exists even with zero real stacks."""
+        n = len(self.rows[tab]) + (1 if tab == TAB_STACKS else 0)
+        self.idx[tab] = max(0, min(n - 1, i))
 
     # -- drawing ------------------------------------------------------
     def draw(self, stdscr):
@@ -524,10 +510,8 @@ class OverviewApp:
             self._draw_domain_tab(stdscr, body_top, body_h, right_x, right_w)
         elif self.proxy_tab == TAB_PORTS:
             self._draw_ports_tab(stdscr, body_top, body_h, right_x, right_w)
-        elif self.proxy_tab == TAB_WHITELIST:
-            self._draw_whitelist_tab(stdscr, body_top, body_h, right_x, right_w)
-        elif self.proxy_tab == TAB_CUSTOM:
-            self._draw_custom_whitelist_tab(stdscr, body_top, body_h, right_x, right_w)
+        elif self.proxy_tab in (TAB_WHITELIST, TAB_CUSTOM):
+            self._draw_whitelist_tab(stdscr, body_top, body_h, right_x, right_w, self.proxy_tab)
         else:
             self._draw_log_tab(stdscr, body_top, body_h, right_x, right_w)
 
@@ -586,55 +570,26 @@ class OverviewApp:
     _BOX_HEAVY = {"tl": "┏", "tr": "┓", "bl": "┗", "br": "┛", "h": "━", "v": "┃"}
 
     @staticmethod
-    def _card_top_border(card_w, label, box=_BOX_LIGHT):
-        """The top border with the stack's env type embedded top-right (" java-toolbelt ")
-        instead of a separate TYPE column header, which never fit a card layout (it described
-        a single column while each card spans the whole row). No label (the "+ New stack"
-        pseudo-card) falls back to a plain border."""
+    def _card_border(card_w, box, top, label=None):
+        """A card's top or bottom border, optionally with a badge embedded in it: the env type
+        top-right (instead of a TYPE column header, which never fit a card layout), and the
+        "🖥️ VS Code" badge bottom-left — left rather than right so the two don't compete. At
+        least one dash always stays between a badge and its corner."""
+        left, right = (box["tl"], box["tr"]) if top else (box["bl"], box["br"])
         avail = max(0, card_w - 2)
         if not label:
-            return box["tl"] + box["h"] * avail + box["tr"]
-        text = f" {label} "[: max(0, avail - 1)]  # keep >=1 dash before the right corner
-        left_len = max(0, avail - len(text) - 1)
-        return box["tl"] + box["h"] * left_len + text + box["h"] + box["tr"]
-
-    @staticmethod
-    def _card_bottom_border(card_w, label, box=_BOX_LIGHT):
-        """The bottom border, with a '🖥️ VS Code' badge embedded bottom-left when this stack's
-        own container carries the Dev Containers spec's `devcontainer.local_folder` label (see
-        docker_utils.LOCAL_FOLDER) — set by VS Code's Dev Containers extension (or the
-        `devcontainer` CLI it shells out to) when IT builds/starts the container, e.g. "Reopen
-        in Container", never by `docker compose up` through run.py. No label (not opened that
-        way, or the "+ New stack" pseudo-card) falls back to a plain border — mirrors
-        _card_top_border, just left-aligned instead of right so it doesn't compete with the
-        env-type badge up top."""
-        avail = max(0, card_w - 2)
-        if not label:
-            return box["bl"] + box["h"] * avail + box["br"]
-        text = f" {label} "[: max(0, avail - 1)]  # keep >=1 dash before the left corner
-        right_len = max(0, avail - len(text) - 1)
-        return box["bl"] + box["h"] + text + box["h"] * right_len + box["br"]
+            return left + box["h"] * avail + right
+        text = f" {label} "[: max(0, avail - 1)]
+        fill = box["h"] * max(0, avail - len(text) - 1)
+        return left + (fill + text + box["h"] if top else box["h"] + text + fill) + right
 
     def _draw_stacks_tab(self, stdscr, top, height, x0, w):
-        """The list always has one extra trailing row — "+ New stack" — past the real stacks,
-        so starting a new one is just another list item (Enter on it) rather than only a
-        separate key ('n' still works too, from anywhere in this pane). Each stack is its own
-        bordered card: its env type sits in the top border (top-right, see
-        _card_top_border), its first content line has the ➤ active-stack marker and
-        "ID: <id>" together on the left and the proxy's live state ("PROXY ACTIVE"/"PROXY
-        INACTIVE", colored) right-aligned, then a FOLDER title line with its value on the
-        line below (long workspace paths need the full line's width, so FOLDER doesn't
-        share a line like ID does). Published ports aren't shown here at all — see the
-        dedicated Ports tab (_draw_ports_tab) instead. No
-        plain column header above the cards — a single-column header never matched a card
-        layout. The border's color is the stack's own container state — green when it's
-        running, red otherwise — and that state is also spelled out top-left in the border
-        (" RUNNING "/" EXITED "), so the proxy's state (line 1) and the container's are both
-        visible. The bottom border embeds a "🖥️ VS Code" badge bottom-left when this stack is
-        also open in VS Code's Dev Containers extension (see _card_bottom_border). Selection is
-        a heavy bold border (shape, not color, since color is taken) —
-        a reverse-video border looked like a filled shadow block, and reversing the content
-        too (status colors, dimmed id/workspace) looked noisy on top of that."""
+        """One bordered card per stack, plus a trailing "+ New stack" pseudo-card (Enter on it
+        = 'n'). Border color = the stack's own container state (green running, red otherwise,
+        also spelled out top-left); env type top-right and the VS Code badge bottom-left (see
+        _card_border). Inside: ➤ active marker, "ID: <id>", the proxy's state right-aligned,
+        then FOLDER on its own two lines (a path needs the full width). Ports live in the Ports
+        tab instead. Selection is a heavy border — shape, not color, since color is taken."""
         rows = self.rows[TAB_STACKS]
         total = len(rows) + 1
         lines = self._STACK_ENTRY_LINES
@@ -655,8 +610,8 @@ class OverviewApp:
                 label = rows[row_i]["env"]
             bottom_label = "🖥️ VS Code" if (not is_new_row and rows[row_i]["in_vscode"]) else None
             try:
-                _safe_addnstr(stdscr, y, x0 + 1, self._card_top_border(card_w, label, box), card_w, border_attr)
-                _safe_addnstr(stdscr, y + lines - 1, x0 + 1, self._card_bottom_border(card_w, bottom_label, box), card_w, border_attr)
+                _safe_addnstr(stdscr, y, x0 + 1, self._card_border(card_w, box, True, label), card_w, border_attr)
+                _safe_addnstr(stdscr, y + lines - 1, x0 + 1, self._card_border(card_w, box, False, bottom_label), card_w, border_attr)
                 for ln in range(1, lines - 1):
                     stdscr.addstr(y + ln, x0 + 1, box["v"], border_attr)
                     stdscr.addstr(y + ln, x0 + card_w, box["v"], border_attr)
@@ -765,35 +720,34 @@ class OverviewApp:
         "specific": "── Specific (per-environment whitelist.d/*.txt) ──",
     }
 
-    def _draw_whitelist_tab(self, stdscr, top, height, x0, w):
-        """Global Whitelist tab — the TRACKED whitelist.d files only (see
-        read_global_whitelist_entries); local.txt entries live in the separate Custom
-        Whitelist tab (_draw_custom_whitelist_tab) instead of a third group here."""
-        rows = self.rows[TAB_WHITELIST]
-        _safe_addnstr(stdscr, top, x0 + 2, f"{'DOMAIN':<40} {'TYPE':<8} FILE", max(0, w - 2), curses.color_pair(3) | curses.A_UNDERLINE)
+    def _draw_whitelist_tab(self, stdscr, top, height, x0, w, tab):
+        """Global Whitelist (TAB_WHITELIST — the tracked files, in Common/Specific sections,
+        with a FILE column) or Custom Whitelist (TAB_CUSTOM — local.txt only, so no sections
+        and no FILE column)."""
+        rows = self.rows[tab]
+        is_global = tab == TAB_WHITELIST
+        header = f"{'DOMAIN':<40} {'TYPE':<8} FILE" if is_global else f"{'DOMAIN':<40} TYPE"
+        _safe_addnstr(stdscr, top, x0 + 2, header, max(0, w - 2), curses.color_pair(3) | curses.A_UNDERLINE)
         if not rows:
-            _safe_addnstr(stdscr, top + 2, x0 + 2, "(no tracked whitelist.d entries)", max(0, w - 2))
+            empty = "(no tracked whitelist.d entries)" if is_global else "(local.txt is empty — 'n' to add a domain)"
+            _safe_addnstr(stdscr, top + 2, x0 + 2, empty, max(0, w - 2))
             return
 
-        # Build the actual display lines (group headers interspersed with rows) and scroll
-        # in *that* space, not row-index space — otherwise _visible_window's row-count-based
-        # budget doesn't know headers eat into it too, and with enough rows the selected one
-        # could fall past the bottom of what actually gets drawn: the view "thinks" it
-        # scrolled far enough, but a header line it didn't account for pushes the real
-        # selection out of the rendered area, so the highlight silently never appears.
+        # Section headers take up display lines too, so scroll in display-line space, not
+        # row-index space — otherwise a header _visible_window didn't account for can push the
+        # selected row below the drawn area and the highlight silently never appears.
         lines = []  # ("header", label) | ("row", entry, row_index)
         last_group = None
-        selected_i = 0
+        selected_line = 0
         for i, e in enumerate(rows):
-            if e["group"] != last_group:
+            if is_global and e["group"] != last_group:
                 lines.append(("header", self._WHITELIST_GROUP_LABEL[e["group"]]))
                 last_group = e["group"]
+            if i == self.idx[tab]:
+                selected_line = len(lines)
             lines.append(("row", e, i))
-            if i == self.idx[TAB_WHITELIST]:
-                selected_i = len(lines) - 1
 
-        # self.scroll[TAB_WHITELIST] is in display lines here, not rows.
-        scroll, visible = self._visible_window(TAB_WHITELIST, len(lines), height, idx=selected_i)
+        scroll, visible = self._visible_window(tab, len(lines), height, idx=selected_line)
         for row_i, line in enumerate(lines[scroll : scroll + visible]):
             y = top + 1 + row_i
             if line[0] == "header":
@@ -801,28 +755,8 @@ class OverviewApp:
                 continue
             _, e, real_i = line
             kind = "wildcard" if e["wildcard"] else "exact"
-            text = f"{e['domain']:<40} {kind:<8} {e['file']}"
-            if real_i == self.idx[TAB_WHITELIST]:
-                attr = curses.A_REVERSE
-            else:
-                attr = curses.color_pair(4) if e["wildcard"] else curses.A_NORMAL
-            _safe_addnstr(stdscr, y, x0 + 2, text, max(0, w - 2), attr)
-
-    def _draw_custom_whitelist_tab(self, stdscr, top, height, x0, w):
-        """Custom Whitelist tab — the gitignored local.txt only (see
-        read_custom_whitelist_entries). No group headers needed, unlike the Global Whitelist
-        tab, since there's only ever this one source file."""
-        rows = self.rows[TAB_CUSTOM]
-        _safe_addnstr(stdscr, top, x0 + 2, f"{'DOMAIN':<40} TYPE", max(0, w - 2), curses.color_pair(3) | curses.A_UNDERLINE)
-        if not rows:
-            _safe_addnstr(stdscr, top + 2, x0 + 2, "(local.txt is empty — 'n' to add a domain)", max(0, w - 2))
-            return
-        start, visible = self._visible_window(TAB_CUSTOM, len(rows), height)
-        for row_i, e in enumerate(rows[start : start + visible]):
-            y = top + 1 + row_i
-            kind = "wildcard" if e["wildcard"] else "exact"
-            text = f"{e['domain']:<40} {kind}"
-            if start + row_i == self.idx[TAB_CUSTOM]:
+            text = f"{e['domain']:<40} {kind:<8} {e['file']}" if is_global else f"{e['domain']:<40} {kind}"
+            if real_i == self.idx[tab]:
                 attr = curses.A_REVERSE
             else:
                 attr = curses.color_pair(4) if e["wildcard"] else curses.A_NORMAL
@@ -894,18 +828,11 @@ class OverviewApp:
 
     def _move(self, delta):
         tab = self.current_tab()
-        if tab == TAB_STACKS:
-            n = len(self.rows[TAB_STACKS]) + 1  # +1 for the trailing "+ New stack" row
-            self.idx[TAB_STACKS] = max(0, min(n - 1, self.idx[TAB_STACKS] + delta))
-        elif tab in (TAB_DOMAINS, TAB_WHITELIST, TAB_CUSTOM):
-            n = len(self.rows[tab])
-            if n:
-                self.idx[tab] = max(0, min(n - 1, self.idx[tab] + delta))
-        elif tab == TAB_PORTS:
-            pass  # read-only view of whichever stack TAB_STACKS has selected — nothing to move
-        else:
-            n = len(self.rows[TAB_LOG])
-            self.log_offset = max(0, min(max(0, n - 1), self.log_offset - delta))
+        if tab in SELECTABLE_TABS:
+            self._select(tab, self.idx[tab] + delta)
+        elif tab == TAB_LOG:
+            self.log_offset = max(0, min(len(self.rows[TAB_LOG]) - 1, self.log_offset - delta))
+        # TAB_PORTS: read-only view of whichever stack TAB_STACKS has selected — nothing to move
 
     # -- Stacks tab -------------------------------------------------------
     def _selected(self, tab):
@@ -913,11 +840,8 @@ class OverviewApp:
         rows = self.rows[tab]
         return rows[self.idx[tab]] if self.idx[tab] < len(rows) else None
 
-    def _selected_stack(self):
-        return self._selected(TAB_STACKS)
-
     def _switch_to_selected_stack(self):
-        s = self._selected_stack()
+        s = self._selected(TAB_STACKS)
         if not s:
             return
         if not s["proxy_cid"]:
@@ -935,10 +859,10 @@ class OverviewApp:
         Can't exec an interactive zsh session inside curses' alternate screen, so this just
         records the request and exits the main loop; the caller (cmd_overview) acts on it
         once curses.wrapper has torn the TUI down and restored the normal terminal."""
-        s = self._selected_stack()
+        s = self._selected(TAB_STACKS)
         if not s:
             return None
-        self.pending_action = ("open_shell", s)
+        self.pending_action = (REPO_ROOT / s["env"], s["workspace"])
         return False
 
     def _new_stack(self, stdscr):
@@ -952,14 +876,13 @@ class OverviewApp:
         if choice is None:
             self.message = "Cancelled."
             return None
-        self.pending_action = ("new_stack", choice)
+        self.pending_action = choice
         return False
 
     def _new_stack_modal(self, stdscr):
         """Runs its own small blocking event loop — like _prompt_new_domain — rather than
         wiring into draw()/handle_key(), since it's a one-shot modal that owns input until
-        confirmed or cancelled. Returns
-        {"compose_dir": Path, "folder": str} or None (Esc).
+        confirmed or cancelled. Returns (compose_dir, folder) or None (Esc).
 
         A toolbelt that already has a stack mounted from `self.target_dir` is tagged
         "running here"/"<state> here" and, when nothing else picks a starting selection
@@ -1004,7 +927,7 @@ class OverviewApp:
                 if key == 9:  # Tab — switch between the type list and the folder field
                     focus = "folder" if focus == "type" else "type"
                 elif key in (10, 13, curses.KEY_ENTER):
-                    return {"compose_dir": env_dirs[idx], "folder": folder.strip() or self.target_dir}
+                    return env_dirs[idx], folder.strip() or self.target_dir
                 elif focus == "type":
                     if key == curses.KEY_UP:
                         idx = (idx - 1) % len(names)
@@ -1124,7 +1047,7 @@ class OverviewApp:
         every container in the project, nothing deleted (that's 'd'). Unlike 'a'/'b', which
         only touch the proxy. Blocking (`docker stop` can take a few seconds), so the footer
         says what's happening before the call."""
-        s = self._selected_stack()
+        s = self._selected(TAB_STACKS)
         if not s:
             return
         h, w = stdscr.getmaxyx()
@@ -1142,7 +1065,7 @@ class OverviewApp:
     def _set_selected_proxy(self, start):
         """'a'/'b': start/stop only the selected stack's proxy (stopping it blocks that
         stack's egress until started again)."""
-        s = self._selected_stack()
+        s = self._selected(TAB_STACKS)
         if not s:
             return
         name = s["env"]
@@ -1183,7 +1106,7 @@ class OverviewApp:
         anonymous volumes removed) — unlike 'b', which only stops the proxy container and
         leaves everything else in place. Destructive and irreversible, so it asks for
         confirmation first (bare Esc — no arrow-sequence follow-up expected here)."""
-        s = self._selected_stack()
+        s = self._selected(TAB_STACKS)
         if not s:
             return
         prompt = f"Delete stack '{s['env']}' (project {s['project']})? Removes containers, networks & volumes.  [y] confirm   [Esc] cancel"
@@ -1216,10 +1139,7 @@ class OverviewApp:
         if r["verdict"] != "BLOCKED":
             self.message = f"ℹ️  '{r['host']}' is already allowed."
             return
-        with _quiet_stdout():
-            do_allow_domain(r["host"])
-        self.refresh()
-        self.message = f"✅ Allowed '{r['host']}' (local.txt — not tracked by git)."
+        self._show_result(do_allow_domain(r["host"]))
 
     def _block_selected_domain(self):
         r = self._selected(TAB_DOMAINS)
@@ -1228,26 +1148,24 @@ class OverviewApp:
         if r["verdict"] != "ALLOWED":
             self.message = f"ℹ️  '{r['host']}' is already blocked."
             return
-        with _quiet_stdout():
-            ok = do_block_domain(r["host"])
+        self._show_result(do_block_domain(r["host"]))
+
+    def _show_result(self, message):
+        """After a whitelist edit: reload everything from disk and show the edit's own status
+        line (see do_allow_domain/do_block_domain)."""
         self.refresh()
-        self.message = f"🚫 Blocked '{r['host']}'." if ok else f"⚠️  '{r['host']}' isn't a literal entry — covered by a wildcard."
+        self.message = message
 
     # -- Global/Custom Whitelist tabs ------------------------------------------
     def _remove_selected_entry(self, tab):
-        """Shared by both whitelist tabs' 'b' — each tab's rows already only ever contain
-        entries from that tab's own file(s) (tracked files for TAB_WHITELIST, local.txt for
-        TAB_CUSTOM — see read_global_whitelist_entries/read_custom_whitelist_entries), so the
-        domain being removed is always scoped correctly by virtue of which tab it was
-        selected in."""
+        """Shared by both whitelist tabs' 'b' — scoped to that tab's own file(s): the tracked
+        files for TAB_WHITELIST, local.txt for TAB_CUSTOM. The same domain listed in both is
+        only removed from the one whose tab you're in."""
         e = self._selected(tab)
         if not e:
             return
-        domain = e["domain"]
-        with _quiet_stdout():
-            do_block_domain(domain)
-        self.refresh()
-        self.message = f"🚫 Removed '{domain}'."
+        files = tracked_whitelist_files() if tab == TAB_WHITELIST else [WHITELIST_LOCAL_FILE]
+        self._show_result(do_block_domain(e["domain"], files))
 
     # -- Access log tab -----------------------------------------------------
     def _clear_log(self):
@@ -1280,12 +1198,8 @@ class OverviewApp:
         """Custom Whitelist tab's 'n' — always local.txt, no further prompt needed since
         there's only one possible target file."""
         domain = self._prompt_text(stdscr, "New domain for local.txt (Enter to confirm, Esc to cancel): ")
-        if not domain:
-            return
-        with _quiet_stdout():
-            do_allow_domain(domain)
-        self.refresh()
-        self.message = f"✅ Added '{domain}' to local.txt (not tracked by git)."
+        if domain:
+            self._show_result(do_allow_domain(domain))
 
     def _prompt_new_global_domain(self, stdscr):
         """Global Whitelist tab's 'n' — deliberately edits a TRACKED whitelist file. Asks for
@@ -1304,12 +1218,7 @@ class OverviewApp:
             self.message = "Cancelled."
             return
 
-        target_env = self.env if choice == "s" else None
-        with _quiet_stdout():
-            do_allow_domain_global(domain, target_env)
-        self.refresh()
-        dest = "00-common.txt" if target_env is None else f"{target_env}.txt"
-        self.message = f"✅ Added '{domain}' to {dest} (tracked — remember to commit it)."
+        self._show_result(do_allow_domain_global(domain, self.env if choice == "s" else None))
 
 
 _ARROW_BY_FINAL_BYTE = {
@@ -1476,11 +1385,8 @@ def cmd_overview(target, follow, rebuild=False, debug=False):
             raise
         if not pending:
             break
-        action, row = pending
-        if action == "open_shell":
-            launcher.start_and_open_shell(REPO_ROOT / row["env"], row["workspace"], rebuild, debug)
-        else:
-            launcher.start_and_open_shell(row["compose_dir"], row["folder"], rebuild, debug)
+        compose_dir, folder = pending
+        launcher.start_and_open_shell(compose_dir, folder, rebuild, debug)
 
 
 def cmd_run(target, rebuild=False, debug=False):
@@ -1501,7 +1407,8 @@ def cmd_run(target, rebuild=False, debug=False):
         print(message or "Cancelled.")
         return
 
-    launcher.start_and_open_shell(choice["compose_dir"], choice["folder"], rebuild, debug)
+    compose_dir, folder = choice
+    launcher.start_and_open_shell(compose_dir, folder, rebuild, debug)
 
 
 def _run_picker(stdscr, target_dir):
