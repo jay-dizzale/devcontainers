@@ -32,20 +32,12 @@ Ruby, Rust, Go, and Python/`uv`, and adds its own tools on top:
 > The launcher lists `base-toolbelt` first, in its own category, followed by
 > the other toolbelts alphabetically.
 
-## Services
+## Not for AI agents
 
-Besides the toolbelts, `run.py` can start long-running **services**, listed under their
-own "Services" heading in the `n` (new stack) modal. A service is not a devcontainer:
-no workspace is mounted and no shell is opened — it just runs, behind the same egress
-proxy, and its card in the Stacks pane shows the URL to open.
-
-| Service | What it is |
-|---------|------------|
-| `open-webui-service` | [Open WebUI](https://github.com/open-webui/open-webui) on `http://localhost:3080` (override with `OPEN_WEBUI_PORT`), preconfigured for **Ollama on your host** (`host.docker.internal:11434`) and Ollama embeddings (`nomic-embed-text`) for RAG. Data is kept in the `open-webui-data` Docker volume, which `stop`/`d` never deletes. |
-
-Before first use, pull the models on the host: `ollama pull nomic-embed-text` plus a chat
-model (e.g. `ollama pull llama3.2`). On a Linux host, Ollama must listen beyond loopback
-(`OLLAMA_HOST=0.0.0.0`); Docker Desktop on macOS/Windows works with the default.
+These environments are meant for a developer working in them directly. They are **not**
+designed to host coding agents, agent harnesses, or LLM front-ends, so none are bundled
+or mounted in. To run an agent against your code in isolation, use a purpose-built
+sandbox such as [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) instead.
 
 ## The common base
 
@@ -172,9 +164,8 @@ anonymous volumes removed).
 ```
 
 Already know you want a brand-new environment? This skips the Stacks/Proxy overview and
-opens straight into the same toolbelt/service picker the Stacks tab's `n` opens, then
-builds/starts your choice immediately (opens a shell for a toolbelt, prints the URL for a
-service). Needs a real terminal. If a toolbelt already has a stack running (or stopped) for
+opens straight into the same toolbelt picker the Stacks tab's `n` opens, then
+builds/starts your choice and opens a shell in it immediately. Needs a real terminal. If a toolbelt already has a stack running (or stopped) for
 the current directory, that entry is marked "(running here)"/"(stopped here)" and
 preselected — confirming it just reconnects you instead of starting a duplicate.
 

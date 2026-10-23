@@ -14,7 +14,7 @@ from . import hostsetup, launcher, proxy
 from .docker_utils import die
 
 HELP_TEXT = """\
-run.py — Interactive launcher for docker-compose devcontainer stacks and services.
+run.py — Interactive launcher for docker-compose devcontainer stacks.
 
 Usage:
   ./run.py [-v /path/to/mount] [-r] [-d] [-f]
@@ -22,17 +22,17 @@ Usage:
       right (Tab/←/→ move between the 5 positions, 1-4 jump straight to a
       proxy sub-tab, q/Ctrl-C quit). The title bar shows whether Docker
       itself is running.
-        Stacks           — every stack and service on the host (not just
-                       this directory), one card each: border green while
-                       its container runs, red otherwise; ID, FOLDER (or a
-                       service's URL), proxy state; ➤ marks the one the
-                       Proxy pane shows. ↑/↓ select, `o` open a shell
-                       (a service: start it and show its URL), `n` (or
-                       Enter on "+ New stack") pick a toolbelt or service
-                       to start, Enter make it the active stack, `s`
-                       stop/start the whole stack (nothing deleted),
-                       `a`/`b` start/stop only its proxy, `d` delete the
-                       stack (confirm first; same as `dev stop`).
+        Stacks           — every stack on the host (not just this
+                       directory), one card each: border green while its
+                       container runs, red otherwise; ID, FOLDER, proxy
+                       state; ➤ marks the one the Proxy pane shows. ↑/↓
+                       select, `o` open a shell (builds/starts it first if
+                       needed), `n` (or Enter on "+ New stack") pick a
+                       toolbelt and folder to start, Enter make it the
+                       active stack, `s` stop/start the whole stack
+                       (nothing deleted), `a`/`b` start/stop only its
+                       proxy, `d` delete the stack (confirm first; same
+                       as `dev stop`).
         1 Domain Stats   — every domain seen for the active stack, hits,
                        live ALLOWED/BLOCKED, last seen. `a` allow (into
                        your gitignored local.txt), `b` block.
@@ -49,9 +49,8 @@ Usage:
 
   ./run.py run [-v /path/to/mount] [-r] [-d]
       Skip the Stacks/Proxy overview and go straight to the "pick a
-      toolbelt or service" modal (same picker as the Stacks tab's `n`),
-      then build/start it immediately — open a shell for a toolbelt, print
-      the URL for a service. Needs an interactive terminal. -d streams the
+      toolbelt" modal (same picker as the Stacks tab's `n`), then
+      build/start it and open a shell in it immediately. Needs an interactive terminal. -d streams the
       build log line-by-line plus Docker's own debug-level logging; without
       it, Docker's default collapsed progress is used.
 
@@ -67,11 +66,10 @@ Usage:
       Stop & delete stacks mounted from that directory (default: cwd).
 
   ./run.py stop --all
-      Stop & delete every devcontainer stack and service, from any directory
-      (a service's external data volume is kept).
+      Stop & delete every devcontainer stack, from any directory.
 
   ./run.py list
-      List every stack and service (project, env, service, status, workspace).
+      List every devcontainer stack (project, env, service, status, workspace).
 
   ./run.py logs [-v /path/to/mount] [-f]
       Show the whitelist proxy's access log (allowed + denied domains) for

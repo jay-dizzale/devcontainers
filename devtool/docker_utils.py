@@ -15,7 +15,6 @@ WORKDIR = '{{.Label "com.docker.compose.project.working_dir"}}'
 CONFIG_FILES = '{{.Label "com.docker.compose.project.config_files"}}'
 ENV = '{{.Label "devcontainer.env"}}'
 WORKSPACE = '{{.Label "devcontainer.workspace"}}'
-KIND = '{{.Label "devcontainer.kind"}}'
 # Set by the Dev Containers spec's own tooling (the VS Code extension, or the `devcontainer`
 # CLI it shells out to) when IT builds/starts the container — e.g. "Reopen in Container" — never
 # by `docker compose up` directly, which is how run.py always starts a stack. Its presence is

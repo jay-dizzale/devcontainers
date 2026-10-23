@@ -8,11 +8,15 @@ This file gives AI coding agents (Claude Code, and any other agent that reads
 A **collection of DevContainer environments**, not an application. Each top-level
 folder ending in `-toolbelt` (`base-toolbelt/`, `infrastructure-toolbelt/`,
 `java-toolbelt/`, `latex-toolbelt/`, `pico-toolbelt/`, `web-toolbelt/`) is one
-containerized development environment. Folders ending in `-service`
-(`open-webui-service/`) are long-running services instead — see "Services" below. Every
-toolbelt layers on a shared base defined in `common/`; a service usually does too, though
-`open-webui-service` is a deliberate exception (see "Services" below). The goal is
-reproducible toolchains that developers launch via `run.py` or VS Code Dev Containers.
+containerized development environment. Every toolbelt layers on a shared base defined in
+`common/`. The goal is reproducible toolchains that developers launch via `run.py` or VS
+Code Dev Containers.
+
+These environments are for a developer working in them directly — they are **not**
+designed to host coding agents, agent harnesses, or LLM front-ends/services (an
+`open-webui-service` once lived here and was removed for exactly this reason). Anyone who
+wants to run an agent against their code in isolation should use a purpose-built sandbox
+such as Docker Sandboxes instead; don't add such a workload here.
 
 There is **no application code to run or test here** — the "product" is the Docker
 images and the scripts that build them.
@@ -94,14 +98,6 @@ images and the scripts that build them.
   environment idles on the base's `sleep infinity`. If you add one that needs
   a background process, add the override on that env's service rather than
   changing `common/base.docker-compose.yml`'s default for everyone.
-- **Reaching the Docker host from `dev`** goes through the proxy too:
-  `host.docker.internal` is deliberately *not* in `dev`'s `NO_PROXY` (the
-  iptables allowlist would drop a direct connection anyway), and the `proxy`
-  service has its own `host-gateway` `extra_hosts` entry to resolve it.
-  `common/proxy/squid.conf` ties `host.docker.internal` and port 11434 (Ollama)
-  to each other — that host is reachable on that port only, and that port only
-  on that host. Opening another host port means another such ACL pair, not a
-  broader `Safe_ports`.
 - No environment uses `network_mode: host` — every environment (including
   `infrastructure-toolbelt`, which previously used it) runs on Compose's
   default bridge network. Egress is restricted by iptables rules set inside
@@ -128,54 +124,6 @@ images and the scripts that build them.
   `docker-compose.yml` needs the matching `secrets: github_token: environment: "GITHUB_TOKEN"`
   block wired into `build.secrets`. Setting `GITHUB_TOKEN` (or `GH_TOKEN`) before running
   `run.py` raises the unauthenticated 60 req/hr rate limit that build otherwise hits.
-
-## Services (`*-service/`)
-
-A **service** is a long-running app, not a devcontainer: no `/workspace` mount, no
-host credentials mounted, no `devcontainer.json`, no shell opened by `run.py`.
-Currently only `open-webui-service/` (Open WebUI, preconfigured for Ollama on the
-Docker host at `host.docker.internal:11434`, with Ollama embeddings for RAG).
-
-- **Unlike a toolbelt, a service's Dockerfile doesn't have to build on
-  `toolbelt-base`** — `open-webui-service/Dockerfile` is `FROM
-  ghcr.io/open-webui/open-webui:${OPEN_WEBUI_VERSION}` (the upstream project's own
-  published image, pinned to a specific release — never `main`/`latest`, which float
-  to HEAD) instead, since that image already bundles everything the app needs and
-  building our own Python environment on `toolbelt-base` just to pip-install the same
-  package was redundant. It still gets the same egress-enforcing entrypoint as every
-  other environment (`COPY common/entrypoint.sh` + a `useradd`'d uid-1000 `ubuntu`
-  user, since the upstream image otherwise runs as root and has no such account) —
-  it's just copied in directly rather than inherited from `toolbelt-base`. Because it
-  doesn't depend on `toolbelt-base`, `launcher.start_service` does not call
-  `ensure_base_image` the way `start_and_open_shell` does for every toolbelt.
-
-- **Top-level `<name>-service/` folders, not nested under `services/`** — the
-  compose path-resolution gotcha (see below) means `common/proxy.docker-compose.yml`'s
-  `../common/...` paths only work when the first compose file sits one level below the
-  repo root. `launcher.discover_env_dirs` skips `*-service` folders;
-  `launcher.discover_service_dirs` lists them. The `n` modal shows them under their own
-  "Services" heading (the folder field doesn't apply).
-- **Does not extend `common/base.docker-compose.yml`** (that's the devcontainer base,
-  with its workspace and credential mounts). It copies only the egress bits —
-  `user: root`, `cap_add: NET_ADMIN`, `depends_on: proxy: service_healthy`, the
-  proxy env vars, `extra_hosts` — so `common/entrypoint.sh` (inherited from
-  `toolbelt-base`, or copied directly into the Dockerfile for a service that isn't
-  built on it — see above) still sets the iptables allowlist, and the proxy sidecar
-  is merged in exactly as for a toolbelt (via `COMPOSE_FILE` in
-  `launcher.start_service`). Its traffic shows up in the TUI's proxy tabs like any
-  stack's.
-- **Labels**: `devcontainer.env=<dir name>` (so `list`/`stop`/the Stacks pane see it,
-  and the Global Whitelist's `s` option targets `whitelist.d/<dir name>.txt`) plus
-  `devcontainer.kind=service`. Single instance: fixed project name (dir name minus
-  `-service`, `launcher.service_project_name`), fixed `container_name`.
-- **Stacks pane**: a service's card shows `service · http://localhost:<port>`
-  (parsed from the container's published port for container port 8080). `o`/`n` start
-  it (`launcher.start_service`) and print the URL — no browser is opened, no shell.
-- **Data lives in an `external: true` named volume** (`open-webui-data`), created by
-  `start_service` before `up` — so `run.py stop`/`d` (`docker compose down -v`) never
-  deletes it. Resetting means `docker volume rm` by hand.
-- Its container `command` is overridden (`start-open-webui`, which runs Open WebUI in
-  the foreground and falls back to `sleep infinity` if it exits).
 
 ## Egress proxy and domain whitelist
 
@@ -302,7 +250,7 @@ explicitly allowed, and every request (allowed or denied) is logged.
   calls) collapses to a single non-scrolling status line and only dumps its buffered output
   if it fails — indistinguishable from a silent hang while it's still running; pass `-d`
   when that matters. `_rebuild_no_cache` and the `compose("up", "-d", "--build")` calls in
-  `start_and_open_shell`/`start_service` used to pass no progress flag at all, regardless of
+  `start_and_open_shell` used to pass no progress flag at all, regardless of
   `-d` (so it never even reached them there) — and `_rebuild_no_cache`'s own attempt put
   `--progress=plain` *after* `build`/`--no-cache`, which compose rejects: `--progress` is a
   **global** `docker compose` flag and has to come before the subcommand
@@ -348,12 +296,12 @@ explicitly allowed, and every request (allowed or denied) is logged.
     `run.py` was invoked from: `dev` gets run from all over the host, so every stack on every
     project shows up here regardless. Each card embeds its env type in the top border
     (top-right) and the stack's own container state top-left (" RUNNING "/" EXITED " — the
-    `dev`/service container, from `docker ps`'s `.State`, not the proxy's); the whole border
+    `dev` container, from `docker ps`'s `.State`, not the proxy's); the whole border
     is green when that container is running, red otherwise. Inside, labeled fields: `ID` has
     its label and value combined on one line (with the `➤` active-stack marker to its left and
     "PROXY ACTIVE"/"PROXY INACTIVE" (green/red) right-aligned on that same line), then `FOLDER`
-    (clipped from the left, `…/end/of/path`, since the end is what tells stacks apart) or, for
-    a service, `URL` — either way kept on a separate title line and value line below it, since
+    (clipped from the left, `…/end/of/path`, since the end is what tells stacks apart) — kept
+    on a separate title line and value line below it, since
     a workspace path needs the full line's width — no separate column header above the cards,
     since a single-column header never matched a card layout. Cards do **not** show ports —
     that's the dedicated Ports sub-tab (see below) — since a card is cramped and ports only
@@ -493,15 +441,14 @@ explicitly allowed, and every request (allowed or denied) is logged.
   behind a question it was about to let you answer anyway was pure friction.
 - **`run.py run` / `dev run`** is a shortcut for "I already know I want a brand-new
   environment" — it skips the Stacks/Proxy overview entirely and opens straight into the same
-  toolbelt/service picker modal the Stacks tab's `n` opens (`proxy.cmd_run`/`_run_picker`,
+  toolbelt picker modal the Stacks tab's `n` opens (`proxy.cmd_run`/`_run_picker`,
   reusing `OverviewApp._new_stack_modal` via a throwaway `OverviewApp` built with no active
   stack — the modal only reads `target_dir`/`env`/`message` off `self`, not the rest of the
-  app's state), then immediately builds/starts the chosen one: opens a shell for a toolbelt
-  (`launcher.start_and_open_shell`, same as `o`), or starts it and prints the URL for a
-  service (`_start_service_and_show_url`). Needs a real terminal, same as the modal itself.
+  app's state), then immediately builds/starts the chosen one and opens a shell in it
+  (`launcher.start_and_open_shell`, same as `o`). Needs a real terminal, same as the modal itself.
   If a toolbelt already has a stack mounted from the target directory, that entry in the
   picker is tagged "(running here)"/"(<state> here)" (green/red, via `list_all_stacks()`
-  filtered to `kind == "toolbelt"` and `workspace == target_dir`) and preselected — so the
+  filtered to `workspace == target_dir`) and preselected — so the
   obvious thing to confirm is "resume the one already here", not "start a redundant second
   one". No separate code path backs this: that entry's `compose_dir` is the same
   `REPO_ROOT/<env>` a from-scratch pick for that toolbelt would use, and
@@ -567,7 +514,7 @@ explicitly allowed, and every request (allowed or denied) is logged.
 ./run.py -d                          # (or --debug) line-by-line build log + Docker debug logging
 ./run.py -f                          # passive — redraws the Domain Statistics table every 2s, no input
 
-# Skip the TUI and go straight to the "pick a toolbelt/service" modal ('n'
+# Skip the TUI and go straight to the "pick a toolbelt" modal ('n'
 # on the Stacks tab), then build/start it immediately. Needs a real terminal.
 ./run.py run
 ./run.py run -v /path/to/your/project
@@ -655,7 +602,8 @@ environment's image (`docker compose build` in that env's directory).
 - **Do not add coding-agent CLIs (Claude Code, Copilot CLI, opencode, etc.) back
   into the images** — no install scripts, no `~/.claude`/`~/.copilot`/`~/.config/opencode`-style
   volume mounts. These environments intentionally run without agent binaries or
-  agent state mounted in.
+  agent state mounted in. The same goes for agent harnesses and LLM services (Open WebUI,
+  Ollama plumbing, etc.) — point users at Docker Sandboxes instead.
 - **Do not run `docker compose down -v`, `docker system prune`, or delete images/volumes**
   unless the user explicitly asks — these destroy running environments and state.
 - **Do not bump pinned versions unprompted.** Version changes are deliberate.
