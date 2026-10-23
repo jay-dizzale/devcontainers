@@ -1,0 +1,7 @@
+# rust-toolbelt
+
+# Rust toolchain (rustup) + crates.io
+static.rust-lang.org
+crates.io
+static.crates.io
+index.crates.io

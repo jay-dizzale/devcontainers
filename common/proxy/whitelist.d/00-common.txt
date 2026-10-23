@@ -37,10 +37,5 @@ dl.google.com
 proxy.golang.org
 sum.golang.org
 
-# Rust toolchain updates + crates.io
-static.rust-lang.org
-crates.io
-static.crates.io
-index.crates.io
 npmjs.org
 registry.npmjs.org

@@ -1,0 +1,27 @@
+services:
+  dev:
+    extends:
+      file: ../common/base.docker-compose.yml
+      service: base
+    labels:
+      - "devcontainer.env=rust-toolbelt"
+    build:
+      context: ..
+      dockerfile: ./rust-toolbelt/Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+        RUST_VERSION: ${RUST_VERSION:-}
+      secrets:
+        - github_token
+    ports:
+      - "127.0.0.1:8000-8009:8000" # Rocket default dev server
+      - "127.0.0.1:8100-8109:8080" # Actix/common Rust dev server default
+
+secrets:
+  github_token:
+    environment: "GITHUB_TOKEN"

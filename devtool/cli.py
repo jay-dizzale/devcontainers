@@ -82,7 +82,7 @@ Usage:
   ./run.py build-base [-r] [-d]
       Build the shared base image (toolbelt-base:latest) and exit. Only
       rebuilds if common/ changed since it was last built; -r forces a
-      from-scratch rebuild. Honours RUST_VERSION from the environment.
+      from-scratch rebuild.
 
   ./run.py -h | --help | help
       Show this help.

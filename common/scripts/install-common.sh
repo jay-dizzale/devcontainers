@@ -46,7 +46,6 @@ apt-get install -qqy apt-transport-https \
   make \
   make build-essential \
   mandoc \
-  rustup \
   socat \
   software-properties-common \
   tk-dev \

@@ -21,7 +21,7 @@ ARG https_proxy
 ARG no_proxy
 
 LABEL org.opencontainers.image.authors="jay-dizzale"
-LABEL description="Shared base image for every toolbelt (built locally by run.sh, never pushed)"
+LABEL description="Shared base image for every toolbelt (built locally by run.py, never pushed)"
 
 ## Install common tools (includes Ruby, Go, and uv - see common/scripts/install-common.sh)
 ADD ./common/lib/ /usr/local/lib/shell/
@@ -32,15 +32,8 @@ RUN --mount=type=secret,id=github_token sh /tmp/install-common.sh
 ## Cleanup
 RUN rm -rf /tmp/*
 
-## Install the Rust toolchain (rustup itself installed above, as root)
-USER ubuntu
-ARG RUST_VERSION=stable
-RUN rustup toolchain install "${RUST_VERSION}" && rustup default "${RUST_VERSION}"
-ENV PATH="/home/ubuntu/.cargo/bin:${PATH}"
-
-## Toolbelts layer on top of this and need root for their own install scripts;
-## each one switches back to `ubuntu` at the end.
-USER root
+## Toolbelts layer on top of this and need root (the user it ends on here) for their own
+## install scripts; each one switches to `ubuntu` at the end.
 
 ## Entrypoint: sets up the egress-enforcing iptables allowlist (needs root +
 ## NET_ADMIN - see common/base.docker-compose.yml), then drops to uid 1000

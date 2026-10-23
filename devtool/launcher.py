@@ -173,16 +173,11 @@ def build_env():
 # ---------------------------------------------------------------------------
 # Shared base image - built locally from common/Dockerfile, never pulled or
 # pushed. Every <env>/Dockerfile does `FROM toolbelt-base:latest`. It is
-# (re)built when it is missing, when common/ (or RUST_VERSION) changed since
-# it was built - tracked by the `toolbelt.base-hash` label - or with -r.
+# (re)built when it is missing, when common/ changed since it was built - tracked by the `toolbelt.base-hash` label - or with -r.
 # Only this launcher does this, so building an env by hand
 # (`docker compose build`, VS Code "Reopen in Container") needs the base to
 # exist already: run `./run.py` once first.
 # ---------------------------------------------------------------------------
-def _rust_version():
-    return os.environ.get("RUST_VERSION", "stable")
-
-
 def _hash_base_inputs():
     paths = [REPO_ROOT / rel for rel in ("common/Dockerfile", "common/entrypoint.sh") if (REPO_ROOT / rel).is_file()]
     for rel in ("common/lib", "common/scripts"):
@@ -192,7 +187,6 @@ def _hash_base_inputs():
     paths.sort(key=lambda p: str(p.relative_to(REPO_ROOT)))
 
     lines = [f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(REPO_ROOT)}\n" for p in paths]
-    lines.append(f"RUST_VERSION={_rust_version()}\n")
     return hashlib.sha256("".join(lines).encode()).hexdigest()[:16]
 
 
@@ -219,7 +213,6 @@ def ensure_base_image(rebuild, debug, env):
         "-f", str(REPO_ROOT / "common" / "Dockerfile"),
         "-t", BASE_IMAGE,
         "--label", f"toolbelt.base-hash={hash_}",
-        "--build-arg", f"RUST_VERSION={_rust_version()}",
     ]
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"):
         cmd += ["--build-arg", name]

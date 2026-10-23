@@ -19,8 +19,7 @@ services:
         - github_token
     ports:
       - "127.0.0.1:3010-3019:3000" # Rails/Puma default dev server
-      - "127.0.0.1:8000-8009:8000" # Rocket default dev server
-      - "127.0.0.1:8100-8109:8080" # Actix/common Rust dev server default
+      - "127.0.0.1:8000-8009:8000" # Django / python -m http.server default dev server
       - "127.0.0.1:8090-8099:8080" # common Go net/http dev server default
       - "127.0.0.1:2345-2354:2345" # Delve default debug port
 

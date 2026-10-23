@@ -7,7 +7,7 @@ This file gives AI coding agents (Claude Code, and any other agent that reads
 
 A **collection of DevContainer environments**, not an application. Each top-level
 folder ending in `-toolbelt` (`base-toolbelt/`, `infrastructure-toolbelt/`,
-`java-toolbelt/`, `latex-toolbelt/`, `pico-toolbelt/`, `web-toolbelt/`) is one
+`java-toolbelt/`, `latex-toolbelt/`, `pico-toolbelt/`, `rust-toolbelt/`, `web-toolbelt/`) is one
 containerized development environment. Every toolbelt layers on a shared base defined in
 `common/`. The goal is reproducible toolchains that developers launch via `run.py` or VS
 Code Dev Containers.
@@ -34,7 +34,7 @@ images and the scripts that build them.
 │   ├── hostsetup.py              # `run.py setup` - host setup, a curses form (was setup.sh)
 │   └── docker_utils.py           # Shared `docker` CLI subprocess helpers, stack resolution
 ├── common/                       # Shared base for every environment
-│   ├── Dockerfile                # Shared base image `toolbelt-base:latest` (install-common + Rust), built locally by run.py
+│   ├── Dockerfile                # Shared base image `toolbelt-base:latest` (install-common), built locally by run.py
 │   ├── base.docker-compose.yml   # Base compose service (mounts, env, user) that others `extend`
 │   ├── container-name.docker-compose.yml  # run.py-only override: container_name = project name
 │   ├── proxy.docker-compose.yml  # Egress proxy sidecar - merged into every stack
@@ -75,20 +75,20 @@ images and the scripts that build them.
 - Each `<env>/Dockerfile` uses **build context `..`** (the repo root), so it can `ADD`
   from both `common/` and the env folder. Keep that in mind when adding `ADD`/`COPY` paths.
 - **The shared base is a local image, never pushed.** `common/Dockerfile` builds
-  `toolbelt-base:latest` (`install-common.sh`, the Rust toolchain;
+  `toolbelt-base:latest` (`install-common.sh`;
   ends as `root`). Every `<env>/Dockerfile` is `FROM ${BASE_IMAGE}` (default
   `toolbelt-base:latest`), runs its own `install-*.sh`, cleans `/tmp`, and ends with
   `USER ubuntu`. `run.py` (`devtool/launcher.py`'s `ensure_base_image`) builds the base when
-  it is missing, when `common/` (or `RUST_VERSION`) changed - tracked by the
+  it is missing, when `common/` changed - tracked by the
   `toolbelt.base-hash` image label - or with `-r`. Only `run.py` does this: a hand-run
   `docker compose build` or VS Code "Reopen in Container" fails with a missing-image error
-  until `./run.py` (or `./run.py build-base`) has built the base once. `RUST_VERSION` is a
-  build arg of the *base*, read from the environment by `run.py`, not wired through the env
-  compose files.
+  until `./run.py` (or `./run.py build-base`) has built the base once.
 - Toolbelts are otherwise self-contained - each owns its own `scripts/` directory and
   does not `ADD` from any other env folder or `FROM` another toolbelt.
 - **`common/` is the shared basis every environment builds on, including
-  Ruby, Rust, Go, and Python/`uv`.** `base-toolbelt` is not a parent image for the
+  Ruby, Go, and Python/`uv`.** Rust is *not* in the base - it lives in `rust-toolbelt`
+  (`rustup` from apt as root, then the toolchain installed per-user as `ubuntu`, pinnable via
+  the usual `RUST_VERSION` build arg). `base-toolbelt` is not a parent image for the
   others - it's just the base with no extras beyond dev-server/debugger port
   mappings. `infrastructure-toolbelt` is IaC/cloud-only on top of that
   (`tenv`, `terraform-docs`, `tflint`, AWS/Azure CLIs, `spacectl`, Kafka) - it does
@@ -579,7 +579,7 @@ environment's image (`docker compose build` in that env's directory).
 - **Versions default to "latest stable" at build time**
   - every install script resolves the newest release via its vendor's API/index when no
   version is given. To pin one instead, wire a `<TOOL>_VERSION` build `arg` through the
-  env's `docker-compose.yml` (see `JAVA_VERSION` for the pattern; `RUST_VERSION` is the exception - it is read by `run.py` for the base image); the
+  env's `docker-compose.yml` (see `JAVA_VERSION` for the pattern); the
   install script already accepts it as `$1`/env-var fallback. Not every env currently has
   this wired for every tool it installs.
 - **Match the surrounding style** - comment headers on scripts, the existing section

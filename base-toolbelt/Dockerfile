@@ -6,7 +6,7 @@ FROM ${BASE_IMAGE}
 ARG DEBIAN_FRONTEND=noninteractive
 
 LABEL org.opencontainers.image.authors="jay-dizzale"
-LABEL description="Toolbelt environment for Ruby, Rust, Go, and Python (uv) development"
+LABEL description="Toolbelt environment for Ruby, Go, and Python (uv) development"
 ENV DEVCONTAINER_TYPE=base-toolbelt
 
 VOLUME [ "/workspace" ]

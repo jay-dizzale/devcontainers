@@ -10,24 +10,24 @@ in VS Code / any DevContainer-aware editor.
 
 ## Available environments
 
-Every environment builds on the **common base** (see below), which now includes
-Ruby, Rust, Go, and Python/`uv`, and adds its own tools on top:
+Every environment builds on the **common base** (see below), which includes
+Ruby, Go, and Python/`uv`, and adds its own tools on top:
 
 | Environment | Focus | Tools installed on top of the base |
 |-------------|-------|------------------------------------|
-| `base-toolbelt` | Ruby, Rust, Go, Python & C development | Nothing extra - the plain common base, with dev-server/debugger port mappings for these languages |
+| `base-toolbelt` | Ruby, Go, Python & C development | Nothing extra - the plain common base, with dev-server/debugger port mappings for these languages |
 | `infrastructure-toolbelt` | Infrastructure-as-Code on AWS & Azure | `tenv` (Terraform/OpenTofu), `terraform-docs`, `tflint`, AWS CLI, AWS SSM plugin, Azure CLI, `spacectl` (Spacelift), Kafka + MSK IAM auth |
 | `java-toolbelt` | Java development | Amazon Corretto JDK, Apache Maven |
 | `latex-toolbelt` | Document authoring | `texlive-full` (with Perl/Tk GUI support) |
 | `pico-toolbelt` | Raspberry Pi Pico / RP2040 firmware | `arm-none-eabi` GCC toolchain, `pico-sdk`, `pico-extras`, `pico-examples` |
+| `rust-toolbelt` | Rust development | `rustup` + the stable Rust toolchain (`rustc`, `cargo`, `rustfmt`, `clippy`) |
 | `web-toolbelt` | Web / Node.js development | Node.js (incl. npm) |
 
 > By default every tool resolves the **latest stable release** at build time -
 > nothing above is pinned to a fixed version number. To pin one, pass its
 > `<TOOL>_VERSION` build arg in that environment's `docker-compose.yml` (e.g.
-> `JAVA_VERSION`); each install script accepts it as `$1`/env-var fallback.
-> `RUST_VERSION` is the exception: it is read from your shell environment by
-> `run.py` when it builds the shared base image. Not every tool has that arg wired through yet -
+> `JAVA_VERSION`, `RUST_VERSION`); each install script accepts it as `$1`/env-var fallback.
+> Not every tool has that arg wired through yet -
 > check the env's `docker-compose.yml` before assuming one is reachable.
 > The launcher lists `base-toolbelt` first, in its own category, followed by
 > the other toolbelts alphabetically.
@@ -47,7 +47,7 @@ Everything in `common/` is shared by all environments (`common/base.docker-compo
 - **Base OS & build tooling** - Ubuntu 26.04, `build-essential`, `make`, `git`,
   `curl`/`wget`, `jq`, `unzip`/`zip`, `vim`, `zsh`, plus the common `-dev` headers
   needed to build languages from source.
-- **Ruby** (built from source), **`rustup`** + Rust toolchain, **Go**, and **`uv`**
+- **Ruby** (built from source), **Go**, and **`uv`**
   (Python version & venv manager) - every environment gets these, not just
   `base-toolbelt`.
 - **`gh`** - GitHub CLI.
@@ -206,7 +206,7 @@ of the raw log, use bare `./run.py` (its own Access log tab).
 ```
 
 The base is local-only (never pushed) and is rebuilt automatically only when
-`common/` (or `RUST_VERSION`) changed. Run this once before using an
+`common/` changed. Run this once before using an
 environment from VS Code "Reopen in Container", which doesn't go through `run.py`.
 
 ## Run it (VS Code / DevContainers)
@@ -216,8 +216,7 @@ Open the environment's folder (e.g. `infrastructure-toolbelt/`) in VS Code and c
 
 ## Configure it
 
-- **Versions** - edit the build `args` in an environment's `docker-compose.yml`
-  (or export `RUST_VERSION` before running `run.py` for the base image).
+- **Versions** - edit the build `args` in an environment's `docker-compose.yml`.
 - **Identity** - `./run.py setup` generates `common/.zshrc` from
   `common/zshrc-template` with the name/email you give it. `common/.zshrc`
   is gitignored (it holds your real identity); only the template is
