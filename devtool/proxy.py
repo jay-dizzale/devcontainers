@@ -16,6 +16,7 @@ import contextlib
 import curses
 import io
 import os
+import re
 import select
 import signal
 import sys
@@ -179,7 +180,15 @@ def _files_listing(domain, files=None):
 # do_allow_domain/do_allow_domain_global/do_block_domain all return a one-line status message
 # rather than printing it: the curses app shows it in its footer (a bare print() there would
 # write underneath curses' alternate screen and corrupt the display), run_snapshot prints it.
+# A hostname with at least two labels, optionally with Squid's leading-dot wildcard. Two
+# labels minimum means a wildcard can never be a bare TLD like ".com" (or "." itself), and
+# no whitespace means one entry can't smuggle several ACL tokens onto a line.
+_DOMAIN_RE = re.compile(r"^\.?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}", re.IGNORECASE)
+
+
 def _add_domain(target, domain, note):
+    if not _DOMAIN_RE.fullmatch(domain):
+        return f"⚠️  '{domain}' isn't a valid domain (e.g. example.com, or .example.com for every subdomain) - not added."
     hits = _files_listing(domain)
     if hits:
         return f"ℹ️  '{domain}' is already whitelisted (in {' '.join(f.name for f in hits)})."

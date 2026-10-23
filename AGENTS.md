@@ -145,15 +145,27 @@ explicitly allowed, and every request (allowed or denied) is logged.
   as before any of this), and `common/entrypoint.sh` - the shared base image's `ENTRYPOINT` -
   sets an iptables `OUTPUT` allowlist once at container start: `ACCEPT` to loopback, to
   Docker's embedded DNS (`127.0.0.11`), and to the resolved IP of the `proxy` service; default
-  `DROP` for everything else. This needs root + `NET_ADMIN`
+  `DROP` for everything else. The same allowlist is applied to IPv6 with `ip6tables` (plus
+  ICMPv6 neighbor discovery, which is IPv6's ARP and would otherwise be dropped too, so even
+  the proxy route fails - tested): without it, a Docker network with IPv6 enabled was a
+  wide-open second route out. If `ip6tables` is unusable, the entrypoint refuses to start
+  when the container has any IPv6 address beyond loopback/link-local. `proxy` is resolved with
+  `getent ahostsv4`, not `hosts`, which can return its IPv6 address first on such a network
+  (which made the IPv4 rule fail and the container never start). This needs root + `NET_ADMIN`
   (`common/base.docker-compose.yml` sets both), so the entrypoint runs as root *briefly*, then
   drops privileges for good (`setpriv --reuid=1000 ...`) before exec'ing the real command.
   Capabilities don't survive a non-ambient privilege drop, so the uid-1000 process that
   follows - and any later `docker exec`/`docker compose exec` into the same container - has
   none; it can't touch the rules again (they live in the network namespace, not per-process).
-  There's no `sudo` or setuid-root binary in the image, so there's no path back to root from
-  inside the container. The only bypass is from the **host** (`docker exec -u root`, or
-  stopping `proxy`) - the same trust boundary as any devcontainer.
+  The capability *bounding set* still contains `NET_ADMIN`, though, and the stock Ubuntu image
+  does ship setuid-root binaries (`su`, `mount`, `umount`, `passwd`, `chsh`, `chfn`,
+  `gpasswd` - an earlier version of this file wrongly said there were none). So
+  `common/base.docker-compose.yml` sets `security_opt: no-new-privileges:true`: setuid bits
+  and file capabilities can't grant anything to any process in the container, including later
+  `docker exec` shells, so there's no path back to root (or `NET_ADMIN`) from inside the
+  container even if one of those binaries had a bug. There's no `sudo`. The only bypass is
+  from the **host** (`docker exec -u root`, or stopping `proxy`) - the same trust boundary as
+  any devcontainer.
   `common/base.docker-compose.yml`'s `base` service sets `HTTP_PROXY`/`HTTPS_PROXY` to
   `http://proxy:3128` and `depends_on: proxy: condition: service_healthy` (so the entrypoint
   can resolve `proxy`'s IP by the time it runs).
@@ -162,7 +174,20 @@ explicitly allowed, and every request (allowed or denied) is logged.
   and either tunnels the bytes untouched or denies the request - it never decrypts, so no CA
   cert needs to be installed and certificate pinning still works. The trade-off: filtering is
   domain-level only (no URL-path filtering), and domain-fronting inside an allowed tunnel isn't
-  caught.
+  caught. The whitelist ACL is `dstdomain -n`: without `-n`, Squid reverse-resolves a raw-IP
+  destination (`CONNECT 203.0.113.7:443`) and allows it if the PTR name is whitelisted - and
+  whoever owns an IP controls its PTR record, so any server could pass as e.g.
+  `x.amazonaws.com` and get through a leading-dot wildcard (reproduced: `TCP_TUNNEL/200`
+  without `-n`, `TCP_DENIED/403` with it). Known, accepted limits of this design: DNS to
+  Docker's embedded resolver is allowed, so data could still leave `dev` via DNS-query
+  tunneling; and `github.com`/`api.github.com` are whitelisted while the host's `gh` token is
+  mounted (read-only, but readable), so code running in `dev` can use that token against
+  GitHub. Treat the whitelist as a guard against accidental/unsolicited egress, not as
+  containment for deliberately hostile code.
+- **Domains added through the TUI/snapshot prompt are validated** (`devtool/proxy.py`'s
+  `_DOMAIN_RE`): a hostname of at least two labels, optionally with the leading-dot wildcard -
+  so a typo like `.com` (every .com domain), `.`, or an entry with spaces (several ACL tokens
+  on one line) is rejected instead of written into squid's ACL.
 - **Whitelist files** live in `common/proxy/whitelist.d/`: `00-common.txt` for domains every
   environment needs, and one `<env>-toolbelt.txt` per toolbelt for its own tools (e.g.
   `corretto.aws` in `java-toolbelt.txt`). The **whole directory** is mounted into every stack's

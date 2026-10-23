@@ -9,6 +9,14 @@ services:
     user: root
     cap_add:
       - NET_ADMIN
+    # The bounding set still holds NET_ADMIN for every later process, and the
+    # stock Ubuntu image ships setuid-root binaries (su, mount, passwd, ...).
+    # no-new-privileges makes setuid bits and file capabilities inert for
+    # every process in the container - including later `docker exec` shells -
+    # so nothing running as ubuntu can regain NET_ADMIN and rewrite the egress
+    # rules common/entrypoint.sh set.
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       proxy:
         condition: service_healthy

@@ -16,7 +16,9 @@
 # guarantees `proxy` already resolves by the time this runs.
 set -eu
 
-PROXY_IP="$(getent hosts proxy | awk '{print $1; exit}')"
+# ahostsv4, not `hosts`: on an IPv6-enabled Docker network `hosts` can return the
+# proxy's IPv6 address first, which the IPv4 rule below can't take.
+PROXY_IP="$(getent ahostsv4 proxy | awk '{print $1; exit}')"
 if [ -z "$PROXY_IP" ]; then
     echo "entrypoint: could not resolve 'proxy' - refusing to start without an egress allowlist" >&2
     exit 1
@@ -37,5 +39,28 @@ iptables -A OUTPUT -p udp -d 127.0.0.11 --dport 53 -j ACCEPT
 iptables -A OUTPUT -p tcp -d 127.0.0.11 --dport 53 -j ACCEPT
 iptables -A OUTPUT -d "$PROXY_IP" -j ACCEPT
 iptables -P OUTPUT DROP
+
+# IPv6 needs the same allowlist, or a Docker network with IPv6 enabled is a
+# wide-open second route out. Same rules (the proxy's IPv6 address(es), if it
+# has any). If ip6tables can't be used at all, start only when the container
+# has no IPv6 address beyond loopback/link-local (/proc/net/if_inet6 field 4 is
+# the scope: 10 = host, 20 = link) - otherwise refuse, rather than run with
+# unfiltered IPv6.
+if ip6tables -L OUTPUT >/dev/null 2>&1; then
+    ip6tables -A OUTPUT -o lo -j ACCEPT
+    ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    # Neighbor discovery is IPv6's ARP. Unlike ARP it's ICMPv6, so the DROP
+    # policy below would eat it and even the allowed proxy route would fail
+    # (tested). Link-local only - it can't carry anything off the network.
+    ip6tables -A OUTPUT -p ipv6-icmp --icmpv6-type neighbour-solicitation -j ACCEPT
+    ip6tables -A OUTPUT -p ipv6-icmp --icmpv6-type neighbour-advertisement -j ACCEPT
+    for ip in $(getent ahostsv6 proxy | awk '$1 !~ /^::ffff:/ {print $1}' | sort -u); do
+        ip6tables -A OUTPUT -d "$ip" -j ACCEPT
+    done
+    ip6tables -P OUTPUT DROP
+elif [ -r /proc/net/if_inet6 ] && awk '$4 != "10" && $4 != "20"' /proc/net/if_inet6 | grep -q .; then
+    echo "entrypoint: container has IPv6 but ip6tables is unusable - refusing to start with unfiltered IPv6 egress" >&2
+    exit 1
+fi
 
 exec setpriv --reuid=1000 --regid=1000 --init-groups -- "$@"
