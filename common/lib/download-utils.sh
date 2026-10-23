@@ -1,5 +1,5 @@
 # /usr/local/lib/shell/download_utils.sh
-# Library file — must be sourced, not executed directly.
+# Library file - must be sourced, not executed directly.
 # Usage: . /usr/local/lib/shell/download_utils.sh
 #
 # Dependencies: wget, sha256sum, sha512sum, awk
@@ -94,7 +94,7 @@ download_and_verify() {
 }
 
 # ---------------------------------------------------------------------------
-# wget wrapper for GitHub API calls. Optional — if GITHUB_TOKEN (or GH_TOKEN)
+# wget wrapper for GitHub API calls. Optional - if GITHUB_TOKEN (or GH_TOKEN)
 # is set in the environment, it's sent as a Bearer token to raise the
 # unauthenticated rate limit (60 req/hr per IP, shared by every build).
 # Arguments: same as wget.

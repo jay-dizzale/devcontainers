@@ -1,4 +1,4 @@
-# Domains needed by the shared base (common/) — installed in every environment.
+# Domains needed by the shared base (common/) - installed in every environment.
 # One domain per line; # comments and blank lines are ignored.
 
 # Ubuntu package mirrors (archive.*/security.* on amd64, ports.* on arm64)
@@ -6,7 +6,7 @@ archive.ubuntu.com
 security.ubuntu.com
 ports.ubuntu.com
 
-# GitHub — git clone/fetch over HTTPS, gh CLI, and release-asset downloads
+# GitHub - git clone/fetch over HTTPS, gh CLI, and release-asset downloads
 # used by several install scripts and everyday dev work
 github.com
 api.github.com
@@ -20,7 +20,7 @@ github-cloud.githubusercontent.com
 gitea.com
 dl.gitea.com
 
-# Trivy — pulls its vulnerability DB from GitHub Container Registry at scan
+# Trivy - pulls its vulnerability DB from GitHub Container Registry at scan
 # time, not just at install time
 ghcr.io
 pkg-containers.githubusercontent.com

@@ -4,7 +4,7 @@ services:
     # root, not 1000:1000: the entrypoint (common/entrypoint.sh) needs root +
     # NET_ADMIN to set up the egress iptables allowlist, then drops to uid
     # 1000 itself before exec'ing `command` below. `docker compose exec`
-    # must pass `-u ubuntu` explicitly from here on (see run.py) — the
+    # must pass `-u ubuntu` explicitly from here on (see run.py) - the
     # container's own default user is now root.
     user: root
     cap_add:
@@ -25,7 +25,7 @@ services:
       - LANGUAGE=en_US:en
       - LC_ALL=en_US.UTF-8
       # Every runtime HTTP/HTTPS request goes through the whitelist-enforcing
-      # proxy sidecar (common/proxy.docker-compose.yml) — enforced by the
+      # proxy sidecar (common/proxy.docker-compose.yml) - enforced by the
       # iptables allowlist in common/entrypoint.sh, not just by setting these.
       # Unrelated to the proxy.env-based HTTP_PROXY/HTTPS_PROXY build args
       # used for the image *build* in every <env>/docker-compose.yml.

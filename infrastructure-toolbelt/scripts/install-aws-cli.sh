@@ -37,7 +37,7 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 # ---------------------------------------------------------------------------
-# AWS CLI v2 — download + PGP signature verification
+# AWS CLI v2 - download + PGP signature verification
 # ---------------------------------------------------------------------------
 AWS_CLI_ZIP="${TMP_DIR}/awscliv2.zip"
 AWS_CLI_SIG="${TMP_DIR}/awscliv2.zip.sig"

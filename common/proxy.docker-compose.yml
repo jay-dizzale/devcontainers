@@ -1,4 +1,4 @@
-# Whitelist-enforcing egress proxy — merged into every stack, alongside each
+# Whitelist-enforcing egress proxy - merged into every stack, alongside each
 # <env>/docker-compose.yml, so every dev container's runtime traffic is
 # forced through it. Wired in three places so no invocation path skips it:
 #   - run.py: added to the COMPOSE_FILE chain
@@ -6,14 +6,14 @@
 #   - manual `docker compose`: pass -f explicitly (see AGENTS.md)
 #
 # Compose resolves relative paths in EVERY merged -f file against the first
-# file's directory, not each file's own directory (verified empirically —
+# file's directory, not each file's own directory (verified empirically -
 # see AGENTS.md). The first file is always <env>/docker-compose.yml (run.py
 # runs `docker compose` with cwd set there; devcontainer.json lists it first
 # too), so paths here are
 # written as if relative to <env>/, matching common/base.docker-compose.yml's
 # existing `../common/.zshrc` mount.
 #
-# `proxy` sits on the stack's ordinary default network, same as `dev` — no
+# `proxy` sits on the stack's ordinary default network, same as `dev` - no
 # `internal: true` split. That mechanism was tried and reverted: a container
 # whose only network is `internal: true` never gets its published ports
 # bound by Docker at all (NetworkSettings.Ports comes back null). Egress
@@ -41,7 +41,7 @@ services:
       - ../common/proxy/whitelist.d:/etc/squid/whitelist.d:ro
       - proxy-logs:/var/log/squid
     healthcheck:
-      # Not a raw TCP probe (nc -z) — that opens and closes the client port
+      # Not a raw TCP probe (nc -z) - that opens and closes the client port
       # without speaking HTTP, which Squid logs every time as a bogus
       # "transaction-end-before-headers" error (tested: an access_log ACL
       # exclusion doesn't suppress it, that logging path skips ACLs

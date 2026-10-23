@@ -32,7 +32,7 @@ KAFKA_TARBALL="kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
 KAFKA_DIR="kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}"
 KAFKA_INSTALL_DIR="/opt/kafka"
 
-# dlcdn.apache.org only hosts the current release — older versions live on
+# dlcdn.apache.org only hosts the current release - older versions live on
 # archive.apache.org. Try dlcdn first and fall back transparently.
 KAFKA_CDN_URL="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TARBALL}"
 KAFKA_ARCHIVE_URL="https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${KAFKA_TARBALL}"
@@ -52,7 +52,7 @@ MSK_IAM_SHA256_URL="${MSK_IAM_URL}.sha256"
 
 # ---------------------------------------------------------------------------
 # Kafka: download & verify via SHA512 sidecar
-# Apache's .sha512 format is "FILENAME: HASH_SPLIT\nACROSS\nLINES" —
+# Apache's .sha512 format is "FILENAME: HASH_SPLIT\nACROSS\nLINES" -
 # strip the "filename:" prefix and all whitespace to get the plain hex hash.
 # ---------------------------------------------------------------------------
 echo "Fetching SHA512 for kafka ${KAFKA_VERSION} ..."

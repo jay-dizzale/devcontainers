@@ -1,6 +1,6 @@
 #!/bin/sh
-# motd — welcome screen shown on container login.
-# Detects installed tools dynamically — only shows what's present.
+# motd - welcome screen shown on container login.
+# Detects installed tools dynamically - only shows what's present.
 # All version checks run in parallel so total wait = slowest single tool.
 
 _C='\033[36m'  # cyan
@@ -99,7 +99,7 @@ _tool "tea"            tea --version
 _tool "trivy"          trivy --version
 _tool "git"            git --version
 
-# Kafka — version lives in the client jar filename (no subprocess needed)
+# Kafka - version lives in the client jar filename (no subprocess needed)
 if [ -d /opt/kafka/libs ]; then
     _kv="$(ls /opt/kafka/libs/kafka-clients-*.jar 2>/dev/null \
            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"

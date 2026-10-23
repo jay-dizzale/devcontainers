@@ -1,6 +1,6 @@
-"""devtool/docker_utils.py — shared Docker CLI subprocess helpers and stack-resolution logic
+"""devtool/docker_utils.py - shared Docker CLI subprocess helpers and stack-resolution logic
 used by both devtool/launcher.py and devtool/proxy.py. Every Docker interaction shells out to
-the `docker` CLI (stdlib subprocess only — no SDK), matching the rest of this package.
+the `docker` CLI (stdlib subprocess only - no SDK), matching the rest of this package.
 """
 import subprocess
 import sys
@@ -8,7 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# `docker ps --format` fields read straight off the ps table — no per-container `inspect`.
+# `docker ps --format` fields read straight off the ps table - no per-container `inspect`.
 PROJECT = '{{.Label "com.docker.compose.project"}}'
 SERVICE = '{{.Label "com.docker.compose.service"}}'
 WORKDIR = '{{.Label "com.docker.compose.project.working_dir"}}'
@@ -16,9 +16,9 @@ CONFIG_FILES = '{{.Label "com.docker.compose.project.config_files"}}'
 ENV = '{{.Label "devcontainer.env"}}'
 WORKSPACE = '{{.Label "devcontainer.workspace"}}'
 # Set by the Dev Containers spec's own tooling (the VS Code extension, or the `devcontainer`
-# CLI it shells out to) when IT builds/starts the container — e.g. "Reopen in Container" — never
+# CLI it shells out to) when IT builds/starts the container - e.g. "Reopen in Container" - never
 # by `docker compose up` directly, which is how run.py always starts a stack. Its presence is
-# therefore a reliable "this stack is also open in VS Code" signal — see devtool/proxy.py's
+# therefore a reliable "this stack is also open in VS Code" signal - see devtool/proxy.py's
 # Stacks cards. https://containers.dev/implementors/spec/#labels
 LOCAL_FOLDER = '{{.Label "devcontainer.local_folder"}}'
 ID, STATE, PORTS = "{{.ID}}", "{{.State}}", "{{.Ports}}"
@@ -65,7 +65,7 @@ def is_running(cid):
 
 
 def proxy_cid_for_project(project):
-    """The `proxy` container ID for a compose project, running or not — callers check
+    """The `proxy` container ID for a compose project, running or not - callers check
     is_running() themselves."""
     rows = ps_rows(f"label=com.docker.compose.project={project}", "label=com.docker.compose.service=proxy", fields=[ID])
     return rows[0][0] if rows else None
@@ -74,14 +74,14 @@ def proxy_cid_for_project(project):
 def resolve_stack(target_dir, required=True, interactive=True):
     """Returns (project, env, workspace) for the stack mounted from target_dir, found by its
     `devcontainer.workspace` label (set to the same absolute path as the /workspace mount).
-    With `interactive=True` (the default — `logs`/`stop`, where the caller needs exactly one,
+    With `interactive=True` (the default - `logs`/`stop`, where the caller needs exactly one,
     user-picked stack), prompts (plain input()) if more than one stack is running from that
     directory. With `interactive=False`, that choice is skipped and the first one (sorted) is
-    returned silently instead — used by `cmd_overview`, where this only seeds which stack the
+    returned silently instead - used by `cmd_overview`, where this only seeds which stack the
     Proxy pane starts on and the Stacks tab already lists (and lets you switch to) every stack
     anyway, so blocking the whole TUI behind a plain-text prompt before it even opens would be
     disruptive for no benefit. With `required=False`, returns None instead of dying when
-    nothing matches — used by the Stacks tab, where "no stack yet for this directory" is an
+    nothing matches - used by the Stacks tab, where "no stack yet for this directory" is an
     expected, recoverable state."""
     print(f"🔍 Looking for containers mounted from: {target_dir}", file=sys.stderr)
     triples = sorted(set(ps_rows(f"label=devcontainer.workspace={target_dir}", fields=[PROJECT, ENV, WORKSPACE])))

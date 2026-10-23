@@ -20,7 +20,7 @@ wget -qO- "${AZURE_KEY_URL}" \
 }
 
 # ---------------------------------------------------------------------------
-# Add APT repository — use VERSION_CODENAME (e.g. "noble"), not a
+# Add APT repository - use VERSION_CODENAME (e.g. "noble"), not a
 # constructed string like "ubuntu2404" which Microsoft does not publish.
 # ---------------------------------------------------------------------------
 AZ_DIST="$(. /etc/os-release && echo "${VERSION_CODENAME}")"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""run.py — entry point for the `devtool` package: the environment picker,
+"""run.py - entry point for the `devtool` package: the environment picker,
 stop/list/dir/logs/build-base, the whitelist-proxy manager (`proxy`), and one-time host setup
 (`setup`). See devtool/cli.py for the actual dispatch logic.
 """

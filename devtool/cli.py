@@ -1,6 +1,6 @@
-"""devtool/cli.py — top-level argument dispatch for `run.py`. Deliberately NOT argparse: flags
+"""devtool/cli.py - top-level argument dispatch for `run.py`. Deliberately NOT argparse: flags
 can appear in any order/repetition, and `setup` must be either the very first token or
-immediately follow a single leading `-v`/`--volume <path>` — the `dev()` shell function set up
+immediately follow a single leading `-v`/`--volume <path>` - the `dev()` shell function set up
 by `run.py setup` always prepends one (`dev() { "<repo>/run.py" -v "$(pwd)" "$@"; }`), so
 `dev setup` arrives here as `-v <cwd> setup`. argparse's subparsers don't model that shape.
 
@@ -14,15 +14,15 @@ from . import hostsetup, launcher, proxy
 from .docker_utils import REPO_ROOT, die
 
 HELP_TEXT = """\
-run.py — Interactive launcher for docker-compose devcontainer stacks.
+run.py - Interactive launcher for docker-compose devcontainer stacks.
 
 Usage:
   ./run.py [-v /path/to/mount] [-r] [-d] [-f]
-      Opens a two-pane app — Stacks on the left, Proxy settings on the
+      Opens a two-pane app - Stacks on the left, Proxy settings on the
       right (Tab/←/→ move between the 5 positions, 1-4 jump straight to a
       proxy sub-tab, q/Ctrl-C quit). The title bar shows whether Docker
       itself is running.
-        Stacks           — every stack on the host (not just this
+        Stacks           - every stack on the host (not just this
                        directory), one card each: border green while its
                        container runs, red otherwise; ID, FOLDER, proxy
                        state; ➤ marks the one the Proxy pane shows. ↑/↓
@@ -33,16 +33,16 @@ Usage:
                        (nothing deleted), `a`/`b` start/stop only its
                        proxy, `d` delete the stack (confirm first; same
                        as `dev stop`).
-        1 Domain Stats   — every domain seen for the active stack, hits,
+        1 Domain Stats   - every domain seen for the active stack, hits,
                        live ALLOWED/BLOCKED, last seen. `a` allow (into
                        your gitignored local.txt), `b` block.
-        2 Global WL      — the shared, committed whitelist files. `b` remove,
+        2 Global WL      - the shared, committed whitelist files. `b` remove,
                        `n` add (then: common to every environment, or just
                        this one?).
-        3 Custom WL      — your gitignored local.txt. `n` add, `b` remove.
-        4 Access log     — the raw log for the active stack, following
+        3 Custom WL      - your gitignored local.txt. `n` add, `b` remove.
+        4 Access log     - the raw log for the active stack, following
                        until you scroll up (↑/↓); `c` clears it.
-      -r/-d apply to whatever you start from the app. -f: passive —
+      -r/-d apply to whatever you start from the app. -f: passive -
       redraws the Domain Stats table every 2s, no key handling. Piped/
       non-terminal output (and no -f): one-shot Domain Stats snapshot plus
       an "add a domain" prompt (also always local.txt).
@@ -56,7 +56,7 @@ Usage:
 
   ./run.py setup
       Host setup: a curses form for git identity, CA certificate bundle,
-      and enterprise proxy settings (proxy URL, no_proxy) — Tab/↑/↓ move
+      and enterprise proxy settings (proxy URL, no_proxy) - Tab/↑/↓ move
       freely between fields, Enter applies all of them, Esc cancels with
       no changes. Re-running it pre-fills the form with whatever is
       already configured. Also (re)generates the container shell config

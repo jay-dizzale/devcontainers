@@ -2,7 +2,7 @@
 # Concatenates whitelist.d/*.txt (comments and blank lines stripped) into the
 # single dstdomain ACL file squid.conf reads, generates the upstream cache_peer
 # chain (if any), then execs squid in the foreground so it stays PID 1 (keeps
-# the fast shutdown_lifetime-0 teardown — see squid.conf). Re-run (docker
+# the fast shutdown_lifetime-0 teardown - see squid.conf). Re-run (docker
 # compose restart proxy) after editing a whitelist.d file or proxy.env to
 # pick up the change.
 set -eu
@@ -12,13 +12,13 @@ WHITELIST_FILE=/etc/squid/whitelist.txt
 
 # sort -u: several whitelist.d/*.txt files legitimately repeat the same
 # domain (e.g. the Apache mirrors java-toolbelt.txt and
-# infrastructure-toolbelt.txt both need) — Squid only warns about ACL
+# infrastructure-toolbelt.txt both need) - Squid only warns about ACL
 # duplicates, but deduping here keeps that log clean.
 #
 # `|| true` on the grep: under `set -e`, a command that fails on the
 # producer side of a pipe (this for-loop feeds `sort -u`) still aborts the
 # loop immediately, even though the pipeline's own exit status only reflects
-# the last stage — grep exits 1 on a file with no whitelist-able lines (a
+# the last stage - grep exits 1 on a file with no whitelist-able lines (a
 # comment-only placeholder, e.g. latex-toolbelt.txt/pico-toolbelt.txt), which
 # silently killed the loop before every alphabetically-later file (confirmed:
 # local.txt, pico-toolbelt.txt, web-toolbelt.txt all went unmerged as a

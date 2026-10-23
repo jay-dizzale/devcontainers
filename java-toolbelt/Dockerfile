@@ -5,7 +5,7 @@ FROM ${BASE_IMAGE}
 # Build-only: no TTY during docker build, so keep debconf from probing for a frontend
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Enterprise proxy support for the build — see common/Dockerfile for the full
+# Enterprise proxy support for the build - see common/Dockerfile for the full
 # rationale (the implicit "predefined proxy build-arg" mechanism proved unreliable;
 # these explicit ARGs make proxy.env's values reach this file's own RUN steps too).
 ARG HTTP_PROXY

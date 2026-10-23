@@ -1,8 +1,8 @@
-"""devtool/launcher.py — `stop`/`list`/`logs`/`build-base`, stack start/stop/teardown, and the
+"""devtool/launcher.py - `stop`/`list`/`logs`/`build-base`, stack start/stop/teardown, and the
 build+start logic (`start_and_open_shell`) that the Stacks pane in devtool/proxy.py calls
 into. The interactive UI itself lives in devtool/proxy.py; one-time host setup in devtool/hostsetup.py.
 
-Stdlib only — every Docker interaction shells out to the `docker`/`docker compose` CLI via
+Stdlib only - every Docker interaction shells out to the `docker`/`docker compose` CLI via
 devtool/docker_utils.py, no SDK.
 """
 import hashlib
@@ -30,7 +30,7 @@ def pick_from_list(label, items):
 
 
 # ---------------------------------------------------------------------------
-# Teardown — `docker compose down -v` per compose project (containers,
+# Teardown - `docker compose down -v` per compose project (containers,
 # networks and non-external volumes removed). Stacks are found by the
 # `devcontainer.env` label set in each <env>/docker-compose.yml, so unrelated
 # docker-compose projects on the host are never matched.
@@ -40,14 +40,14 @@ def _project_workdirs(*filters):
 
 
 def _teardown(pairs):
-    """Returns one result dict per torn-down project — {"project", "workdir", "ok", "output"}
-    — so a caller that wants the output somewhere other than stdout (the Stacks tab's 'd'
+    """Returns one result dict per torn-down project - {"project", "workdir", "ok", "output"}
+    - so a caller that wants the output somewhere other than stdout (the Stacks tab's 'd'
     shows it in a modal) has it, while the `stop`/`stop --all` CLI path gets it printed."""
     results = []
     for proj, workdir in pairs:
         print(f"🛑 Stopping & deleting stack '{proj}' (in {workdir}) ...")
         # capture_output: this also runs from inside the Stacks tab's curses session ('d'),
-        # where an uncaptured subprocess would print straight over the alternate screen —
+        # where an uncaptured subprocess would print straight over the alternate screen -
         # confirmed: exactly what broke the Stacks tab's view on delete.
         if workdir and os.path.isdir(workdir):
             r = subprocess.run(["docker", "compose", "down", "-v"], cwd=workdir,
@@ -72,7 +72,7 @@ def teardown_stack(project):
 
 
 def cmd_stop(target):
-    """`stop` — tear down every stack mounted from `target` (default: cwd)."""
+    """`stop` - tear down every stack mounted from `target` (default: cwd)."""
     print(f"🔍 Looking for containers mounted from: {target}")
     pairs = _project_workdirs(f"label=devcontainer.workspace={target}")
     if not pairs:
@@ -81,7 +81,7 @@ def cmd_stop(target):
 
 
 def cmd_stop_all():
-    """`stop --all` — tear down every devcontainer stack, from any directory."""
+    """`stop --all` - tear down every devcontainer stack, from any directory."""
     print("🔍 Looking for all devcontainer stacks ...")
     pairs = _project_workdirs("label=devcontainer.env")
     if not pairs:
@@ -90,7 +90,7 @@ def cmd_stop_all():
 
 
 # ---------------------------------------------------------------------------
-# Plain stop/start of a whole stack — every container in the compose project,
+# Plain stop/start of a whole stack - every container in the compose project,
 # nothing removed. `docker stop`/`start` on the containers directly rather than
 # `docker compose stop/start`, which would need the exact COMPOSE_FILE/env the
 # stack was created with. Backs the Stacks pane's 's' toggle.
@@ -116,7 +116,7 @@ def start_stack(project):
 
 
 def cmd_list():
-    """`list` — every devcontainer stack, regardless of where it was started from."""
+    """`list` - every devcontainer stack, regardless of where it was started from."""
     rows = sorted(set(ps_rows("label=devcontainer.env", fields=[PROJECT, ENV, SERVICE, STATE, WORKSPACE])))
     if not rows:
         print("No devcontainer stacks found.")
@@ -127,17 +127,17 @@ def cmd_list():
 
 
 def cmd_logs(target, follow):
-    """`logs` — tail (or one-shot view) the proxy's access log for the stack mounted from
+    """`logs` - tail (or one-shot view) the proxy's access log for the stack mounted from
     `target`. No -t on exec: tail needs no TTY, so this also works piped/scripted."""
     project, env, _workspace = resolve_stack(target)
     proxy_cid = proxy_cid_for_project(project)
     if not proxy_cid:
         die(f"No 'proxy' container found for stack '{project}' ({env}).")
     if not is_running(proxy_cid):
-        die(f"Proxy for '{env}' (project {project}) isn't running — './run.py' (Stacks tab, 'a') to start it.")
+        die(f"Proxy for '{env}' (project {project}) isn't running - './run.py' (Stacks tab, 'a') to start it.")
 
     if follow:
-        print(f"📜 Tailing access log for '{env}' (project {project}) — Ctrl-C to stop ...")
+        print(f"📜 Tailing access log for '{env}' (project {project}) - Ctrl-C to stop ...")
     else:
         print(f"📜 Access log for '{env}' (project {project}):")
     tail = ["tail", "-n", "50"] + (["-f"] if follow else [])
@@ -171,10 +171,10 @@ def build_env():
 
 
 # ---------------------------------------------------------------------------
-# Shared base image — built locally from common/Dockerfile, never pulled or
+# Shared base image - built locally from common/Dockerfile, never pulled or
 # pushed. Every <env>/Dockerfile does `FROM toolbelt-base:latest`. It is
 # (re)built when it is missing, when common/ (or RUST_VERSION) changed since
-# it was built — tracked by the `toolbelt.base-hash` label — or with -r.
+# it was built - tracked by the `toolbelt.base-hash` label - or with -r.
 # Only this launcher does this, so building an env by hand
 # (`docker compose build`, VS Code "Reopen in Container") needs the base to
 # exist already: run `./run.py` once first.
@@ -203,7 +203,7 @@ def ensure_base_image(rebuild, debug, env):
         return
 
     if not have:
-        print(f"🏗️  Building base image {BASE_IMAGE} (first time — this takes a while) ...")
+        print(f"🏗️  Building base image {BASE_IMAGE} (first time - this takes a while) ...")
     else:
         print(f"🏗️  Rebuilding base image {BASE_IMAGE} (common/ changed or --rebuild) ...")
 
@@ -245,7 +245,7 @@ def discover_env_dirs():
 # Building/starting a stack.
 # ---------------------------------------------------------------------------
 def _compose_runner(compose_dir, project, compose_files, **extra_env):
-    """(env, compose) — the env every call for this stack needs, and a `docker compose`
+    """(env, compose) - the env every call for this stack needs, and a `docker compose`
     runner bound to it (cwd = the env folder, so relative paths resolve as AGENTS.md
     describes)."""
     env = build_env()
@@ -261,7 +261,7 @@ def _compose_runner(compose_dir, project, compose_files, **extra_env):
 
 def _rebuild_no_cache(compose, debug):
     """-r: tear down first so --no-cache is never skipped. Returns True on success.
-    `--progress` is a GLOBAL `docker compose` flag — it has to come *before* the
+    `--progress` is a GLOBAL `docker compose` flag - it has to come *before* the
     subcommand (`compose("--progress=plain", "build", ...)`), not after it, or compose
     rejects it ("--progress is a global compose flag, better use `docker compose
     --progress xx build ...`") and silently falls back to its default "auto" progress."""
@@ -273,16 +273,16 @@ def _rebuild_no_cache(compose, debug):
 
 def start_and_open_shell(compose_dir, volume, rebuild, debug):
     """Builds (if needed)/starts the stack for `compose_dir` mounted from `volume`, then opens
-    a shell in it — or reconnects straight to a shell if it's already running. Called by the
+    a shell in it - or reconnects straight to a shell if it's already running. Called by the
     Stacks tab's 'o'/'n' after tearing curses down (a real interactive zsh session can't run
     inside the curses alternate screen)."""
     if not (REPO_ROOT / "common" / ".zshrc").is_file():
-        die("common/.zshrc not found — run './run.py setup' first.")
+        die("common/.zshrc not found - run './run.py setup' first.")
 
     print(f"📂 Working in: {compose_dir}")
     print(f"📁 Mounting volume: {volume}")
 
-    # Project name: random (`dev-<8 hex>`), encodes nothing — a stack is identified by its
+    # Project name: random (`dev-<8 hex>`), encodes nothing - a stack is identified by its
     # `devcontainer.env` + `devcontainer.workspace` labels. Reuse the project of an existing
     # stack for this env + directory to reconnect; otherwise mint a new one.
     env_name = compose_dir.name
@@ -297,7 +297,7 @@ def start_and_open_shell(compose_dir, volume, rebuild, debug):
         die("Failed to build stack.")
 
     if compose("ps", "--status", "running", "-q", capture_output=True, text=True).stdout.strip():
-        print("♻️  Stack already running — connecting to the existing container.")
+        print("♻️  Stack already running - connecting to the existing container.")
     else:
         if env_name == "java-toolbelt":
             print("☕ Java major version:", file=sys.stderr)
@@ -310,10 +310,10 @@ def start_and_open_shell(compose_dir, volume, rebuild, debug):
         if compose(*progress, "up", "-d", *([] if rebuild else ["--build"])).returncode != 0:
             die("Failed to start stack.")
 
-    print("ℹ️  The stack keeps running after you exit the shell — it is not stopped or deleted automatically.")
+    print("ℹ️  The stack keeps running after you exit the shell - it is not stopped or deleted automatically.")
     print("   Run './run.py stop' (or 'dev stop') to stop & delete it.")
 
-    # `proxy` (from common/proxy.docker-compose.yml) is infrastructure, not a shell target —
+    # `proxy` (from common/proxy.docker-compose.yml) is infrastructure, not a shell target -
     # excluded so environments with a single `dev` service still auto-select it.
     services_result = compose("config", "--services", capture_output=True, text=True)
     if services_result.returncode != 0:
@@ -328,7 +328,7 @@ def start_and_open_shell(compose_dir, volume, rebuild, debug):
     else:
         svc_choice = pick_from_list("🐳 Available services (enter 's' to skip shell)", services)
         if svc_choice == "s":
-            print("⏭️  Skipping shell. Stack is running — press Ctrl-C to stop.")
+            print("⏭️  Skipping shell. Stack is running - press Ctrl-C to stop.")
 
             def _cleanup(_signum, _frame):
                 print("\n🛑 Stopping stack …")
@@ -345,7 +345,7 @@ def start_and_open_shell(compose_dir, volume, rebuild, debug):
             die(f"Invalid selection: {svc_choice}")
 
     # -u ubuntu: the container's default user is root (the entrypoint needs it briefly for the
-    # egress iptables rules before dropping privileges itself) — exec would land as root too.
+    # egress iptables rules before dropping privileges itself) - exec would land as root too.
     # exec, not subprocess.run: run.py replaces itself with `docker compose exec`, so nothing of
     # it lingers (not even an idle parent) while the user works in the container.
     print(f"🚀 Opening zsh in service '{service}' …", flush=True)

@@ -1,4 +1,4 @@
-# Ignore all certificate files — never commit credentials or CA certs.
+# Ignore all certificate files - never commit credentials or CA certs.
 *
 !.gitignore
 !.gitkeep
