@@ -144,8 +144,15 @@ explicitly allowed, and every request (allowed or denied) is logged.
   Instead, `dev` stays on the stack's ordinary default network (port-publishing works exactly
   as before any of this), and `common/entrypoint.sh` - the shared base image's `ENTRYPOINT` -
   sets an iptables `OUTPUT` allowlist once at container start: `ACCEPT` to loopback, to
-  Docker's embedded DNS (`127.0.0.11`), and to the resolved IP of the `proxy` service; default
-  `DROP` for everything else. The same allowlist is applied to IPv6 with `ip6tables` (plus
+  Docker's embedded DNS (`127.0.0.11`), and to TCP port 3128 anywhere on the stack's own
+  network (the directly connected route that contains `proxy`'s IP, read from
+  `/proc/net/route` since iproute2 isn't installed) except its gateway, which is dropped so the
+  host side of the bridge can't stand in for the proxy; default `DROP` for everything else. Not
+  `proxy`'s exact IP: the proxy gets restarted behind `dev`'s back (whitelist edits, `b`/`a`),
+  Docker doesn't guarantee it gets the same IP back, and `dev` can't rewrite its rules after
+  dropping `NET_ADMIN` - a pinned IP went stale and every proxied request hung (reproduced by
+  making another container take the proxy's address while it was stopped). The network holds
+  only `dev` and `proxy`, so the port rule reaches nothing else. The same allowlist is applied to IPv6 with `ip6tables` (plus
   ICMPv6 neighbor discovery, which is IPv6's ARP and would otherwise be dropped too, so even
   the proxy route fails - tested): without it, a Docker network with IPv6 enabled was a
   wide-open second route out. If `ip6tables` is unusable, the entrypoint refuses to start

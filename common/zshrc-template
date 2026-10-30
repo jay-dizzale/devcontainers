@@ -25,6 +25,17 @@ if [ -f $HOME/.zshrc2 ]; then
 fi
 PROMPT='%F{green}%*%f %F{blue}%~%f %F{red}${vcs_info_msg_0_}%f$ '
 
+# infrastructure-toolbelt only: show the active AWS_PROFILE/AWS_REGION on the
+# prompt line, since a wrong profile/region is exactly the kind of mistake
+# that's expensive to make against real infra. Gated on DEVCONTAINER_TYPE
+# (set per-env in each Dockerfile), not on AWS_PROFILE/AWS_REGION being set,
+# so other toolbelts never show this segment; PROMPT_SUBST (set above)
+# re-evaluates the ${...:-none} fallbacks on every prompt draw, so switching
+# profile/region mid-session is reflected immediately.
+if [ "${DEVCONTAINER_TYPE:-}" = "infrastructure-toolbelt" ]; then
+  PROMPT='%F{green}%*%f %F{blue}%~%f %F{yellow}${AWS_PROFILE:-none}:${AWS_REGION:-none}%f %F{red}${vcs_info_msg_0_}%f$ '
+fi
+
   git config --global user.email "CHANGE_ME@example.com"
   git config --global user.name "Change Me"
 
@@ -36,18 +47,23 @@ git config --global color.diff auto
 git config --global color.interactive auto
 git config --global color.status auto
 git config --global color.grep auto
-git config --global --add safe.directory '*'
-git config --global --add --bool push.autoSetupRemote true
+git config --global --replace-all safe.directory '*'
+git config --global --bool push.autoSetupRemote true
 git config --global pull.rebase false
 
 # Wire up gh's credential helper so `git push`/`git clone` over HTTPS work
-# without a separate login - only if gh is installed and already authenticated.
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+# without a separate login - only if gh is installed and has a stored token.
+# `gh auth token` reads the mounted config offline; `gh auth status` would call
+# the GitHub API through the egress proxy on every login and can hang the shell
+# before the prompt (and motd) appear.
+if command -v gh >/dev/null 2>&1 && gh auth token >/dev/null 2>&1; then
   gh auth setup-git >/dev/null 2>&1
 fi
 
-# Same idea for tea (Gitea CLI) - only if tea is installed and already logged in.
-if command -v tea >/dev/null 2>&1 && tea whoami >/dev/null 2>&1; then
+# Same idea for tea (Gitea CLI) - only if tea is installed and has a config.
+# Checked offline for the same reason (`tea whoami` is a network call); -f
+# because Docker mounts a missing host file as an empty directory.
+if command -v tea >/dev/null 2>&1 && [ -f "$HOME/.config/tea/config.yml" ] && [ -s "$HOME/.config/tea/config.yml" ]; then
   tea login helper setup >/dev/null 2>&1
 fi
 
