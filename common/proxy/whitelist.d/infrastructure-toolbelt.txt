@@ -15,10 +15,18 @@ awscli.amazonaws.com
 s3.amazonaws.com
 .amazonaws.com
 
-# Terraform/OpenTofu (tenv) + provider registry
+# Terraform (tenv + provider registry)
 registry.terraform.io
 releases.hashicorp.com
 checkpoint-api.hashicorp.com
+
+# OpenTofu (tenv installs it straight from GitHub releases, already covered
+# by 00-common.txt's github.com family; these two are OpenTofu-specific:
+# get.opentofu.org serves the PGP key tenv verifies release signatures
+# against, registry.opentofu.org is what `tofu init` resolves providers/
+# modules from by default)
+get.opentofu.org
+registry.opentofu.org
 
 # Spacelift (spacectl) - account-specific API host; uncomment/add yours:
 # api.spacelift.io
