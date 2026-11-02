@@ -95,6 +95,68 @@ def _installed_certs():
 
 
 # ---------------------------------------------------------------------------
+# Host directories bind-mounted read-write into a container (~/.aws, ~/.m2, ...)
+# ---------------------------------------------------------------------------
+def _discover_rw_host_mounts():
+    """Every `~/...`-sourced read-write bind mount declared across every toolbelt's and agent's
+    own docker-compose.yml - read from the compose files themselves rather than a separately
+    hand-maintained list, so a future environment's new host mount is picked up automatically
+    without this needing a matching edit. `:ro` mounts (e.g. `~/.config/gh`) are excluded: a
+    container can't write through one regardless of the host directory's ownership, so there's
+    nothing here for `run.py setup` to fix for those."""
+    seen = {}
+    files = sorted(REPO_ROOT.glob("*/docker-compose.yml")) + sorted(REPO_ROOT.glob("agents/*/docker-compose.yml"))
+    for compose_file in files:
+        for raw in compose_file.read_text().splitlines():
+            line = raw.strip()
+            if not line.startswith("- ~/"):
+                continue
+            parts = line[2:].split(":")
+            source = parts[0].rstrip("/")
+            mode = parts[-1].strip() if len(parts) >= 3 else ""
+            if mode == "ro":
+                continue
+            seen.setdefault(source, compose_file.parent.name)
+    return seen
+
+
+def _apply_host_mount_dirs():
+    """Creates each RW host mount directory from _discover_rw_host_mounts() that doesn't exist
+    yet - as whoever is running `run.py setup`, so it's never left to Docker to create instead.
+    Docker creates a missing bind-mount source itself, right before the container starts, as
+    root (dockerd's, or on Docker Desktop its backing VM's, own user) - and since a bind mount
+    shares numeric uid/gid verbatim with the host, that then shows up as root-owned inside the
+    container too, where uid 1000 (ubuntu) can't write into it (breaks `aws configure`,
+    `az login`, Maven's local repo cache, ...). Pre-creating it here instead sidesteps that
+    entirely - nothing to chown, nothing ever runs as root for this. A directory that's already
+    there is left exactly as it is; one that's already wrongly root-owned from before this
+    existed needs a one-time manual fix - flagged below rather than silently chowned, since
+    that needs privileges `run.py setup` doesn't have and shouldn't reach for on its own."""
+    _step("Host-mounted directories")
+    mounts = _discover_rw_host_mounts()
+    if not mounts:
+        _info("None declared by any environment - nothing to do.")
+        return
+
+    uid = os.getuid()
+    needs_fix = []
+    for source, env_name in sorted(mounts.items()):
+        path = Path(source).expanduser()
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
+            print(f"   {path} ({env_name}) - created, now owned by you")
+        elif path.stat().st_uid != uid:
+            print(f"   {path} ({env_name}) - exists, but NOT owned by you")
+            needs_fix.append(path)
+        else:
+            print(f"   {path} ({env_name}) - already exists, correctly owned")
+
+    for path in needs_fix:
+        print(f"⚠️  {path} exists but isn't owned by you - a container mounting it may hit")
+        print(f"   permission errors. Fix once with: sudo chown -R $(id -u):$(id -g) {path}")
+
+
+# ---------------------------------------------------------------------------
 # Curses form
 # ---------------------------------------------------------------------------
 def _setup_wizard(stdscr, defaults, installed_certs):
@@ -285,6 +347,7 @@ def run():
     _apply_ca_bundle(values["ca_cert"].strip())
     _apply_proxy_env(values["proxy_url"].strip(), values["no_proxy"].strip())
     _apply_dev_function()
+    _apply_host_mount_dirs()
 
     print("\n🎉 Setup complete. Open any project with:\n")
     print("   cd /path/to/your/project")
