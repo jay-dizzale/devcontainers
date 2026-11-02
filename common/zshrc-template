@@ -48,7 +48,7 @@ git config --global color.interactive auto
 git config --global color.status auto
 git config --global color.grep auto
 git config --global --replace-all safe.directory '*'
-git config --global --bool push.autoSetupRemote true
+git config --global --replace-all --bool push.autoSetupRemote true
 git config --global pull.rebase false
 
 # Wire up gh's credential helper so `git push`/`git clone` over HTTPS work
