@@ -79,6 +79,13 @@ Usage:
       the stack mounted from that directory (default: cwd). -f follows it
       live; prompts if more than one stack is running from that directory.
 
+  ./run.py login <claude|gh> [-v /path/to/mount]
+      Authenticate an agent environment's CLI (claude-agent, copilot-agent)
+      for the stack mounted from that directory (default: cwd) - only
+      those ship agent-login.sh. Needs an interactive terminal and your
+      browser; runs inside the already-running stack, same as opening a
+      shell - see AGENTS.md's agent-sandbox note.
+
   ./run.py build-base [-r] [-d]
       Build the shared base image (toolbelt-base:latest) and exit. Only
       rebuilds if common/ changed since it was last built; -r forces a
@@ -122,6 +129,7 @@ def main(argv):
 
 def _run_generic(args, invocation_dir):
     stop = stop_all = do_list = do_dir = do_logs = do_run = follow = rebuild = debug = build_base = False
+    login_tool = None
     volume_in = invocation_dir
 
     i = 0
@@ -138,6 +146,10 @@ def _run_generic(args, invocation_dir):
             do_dir = True; i += 1
         elif tok == "logs":
             do_logs = True; i += 1
+        elif tok == "login":
+            if i + 1 >= len(args) or args[i + 1] not in ("claude", "gh"):
+                die("'login' requires an argument: claude or gh")
+            login_tool = args[i + 1]; i += 2
         elif tok == "run":
             do_run = True; i += 1
         elif tok == "build-base":
@@ -169,6 +181,9 @@ def _run_generic(args, invocation_dir):
         return 0
     if do_logs:
         launcher.cmd_logs(volume, follow)
+        return 0
+    if login_tool:
+        launcher.cmd_login(volume, login_tool)
         return 0
     if do_run:
         proxy.cmd_run(volume, rebuild, debug)

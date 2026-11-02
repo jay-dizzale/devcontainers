@@ -1,0 +1,10 @@
+// DRAFT. ${VOLUME}/the opened folder is mounted read-write at /workspace,
+// same as every toolbelt - see this directory's docker-compose.yml's
+// ACCEPTED RISK note.
+{
+	"name": "copilot-agent",
+	"dockerComposeFile": ["docker-compose.yml", "../../common/proxy.docker-compose.yml"],
+	"service": "dev",
+	"workspaceFolder": "/workspace",
+	"remoteUser": "ubuntu"
+}

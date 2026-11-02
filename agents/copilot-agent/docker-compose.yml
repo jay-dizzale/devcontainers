@@ -1,0 +1,86 @@
+# DRAFT. Deliberately does NOT `extends: common/base.docker-compose.yml`'s
+# `base` service, unlike every toolbelt - that service also bind-mounts
+# ~/.config/tea, which doesn't belong here. Everything this service
+# actually needs is declared explicitly below instead of inherited.
+#
+# ACCEPTED RISK (explicit user decision): ${VOLUME} is mounted READ-WRITE
+# straight at /workspace, same as every toolbelt - no read-only mount +
+# internal `git clone` buffer in between (an earlier draft had one,
+# mirroring Docker Sandboxes' "clone mode" - see git history). A
+# misbehaving agent can therefore corrupt or delete the actual project
+# files directly, not just produce commits a human chooses to pull in.
+#
+# DOES use ../../common/proxy.docker-compose.yml: devtool/launcher.py's
+# PROXY_COMPOSE is hardcoded to that one file with no per-env override, so
+# `run.py`/`dev` was always going to use it regardless of any per-env
+# proxy variant. The domains this needs beyond the shared base are added
+# the normal way instead: common/proxy/whitelist.d/copilot-agent.txt.
+#
+# Credentials are NOT reused from the host. You log in from inside this
+# container (agents/copilot-agent/scripts/agent-login.sh) and that session lives
+# only in the agent-gh-config named volume below - isolated from the
+# host, but also gone if that volume is ever removed (docker compose down
+# -v), unlike a host-mounted credential. One login covers both the
+# Copilot CLI and `git push`/`fetch` against /workspace - the Copilot CLI
+# rides on gh's own auth, there's no separate Copilot-specific login step.
+#
+# No published ports here - `gh auth login`'s default device-code flow
+# needs no local callback server at all.
+services:
+  dev:
+    build:
+      context: ../..
+      dockerfile: agents/copilot-agent/Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+    image: copilot-agent:latest
+    init: true
+    # Same root-then-drop pattern as every toolbelt (common/entrypoint.sh,
+    # inherited via common/Dockerfile's ENTRYPOINT) - needed for the same
+    # egress iptables allowlist, nothing agent-specific here.
+    user: root
+    cap_add:
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      proxy:
+        condition: service_healthy
+    labels:
+      - "devcontainer.env=copilot-agent"
+      - "devcontainer.workspace=${VOLUME:-../../..}"
+    environment:
+      - LANG=en_US.UTF-8
+      - LANGUAGE=en_US:en
+      - LC_ALL=en_US.UTF-8
+      - HTTP_PROXY=http://proxy:3128
+      - HTTPS_PROXY=http://proxy:3128
+      - NO_PROXY=localhost,127.0.0.1
+      - http_proxy=http://proxy:3128
+      - https_proxy=http://proxy:3128
+      - no_proxy=localhost,127.0.0.1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Same shell config every toolbelt gets via `extends: base` - not
+      # inherited here since this doesn't `extends` at all (see the top
+      # comment), so it has to be listed explicitly. Harmless/useful as-is:
+      # its gh credential-helper setup already no-ops cleanly when there's
+      # nothing to wire up (see common/zshrc-template), and correctly
+      # picks up whatever `run.py login gh` logged in as, once you have.
+      - ../../common/.zshrc:/home/ubuntu/.zshrc:ro
+      - ../../common/.history:/home/ubuntu/.history
+      - ${VOLUME:-../../..}:/workspace
+      # Isolated login session - see the credentials note above. Named
+      # volume, not a host bind mount: survives a container restart,
+      # never touches any host directory.
+      - agent-gh-config:/home/ubuntu/.config/gh
+    command: ["/usr/local/bin/startup.sh"]
+
+volumes:
+  agent-gh-config:

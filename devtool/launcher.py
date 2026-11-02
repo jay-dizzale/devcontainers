@@ -19,6 +19,22 @@ from .docker_utils import (
 BASE_IMAGE = "toolbelt-base:latest"  # keep in sync with ARG BASE_IMAGE in <env>/Dockerfile
 PROXY_COMPOSE = REPO_ROOT / "common" / "proxy.docker-compose.yml"
 CONTAINER_NAME_COMPOSE = REPO_ROOT / "common" / "container-name.docker-compose.yml"
+# Agent environments (`*-agent`, see AGENTS.md's agent-sandbox note) live one level
+# deeper than toolbelts, under agents/<env> rather than directly at the repo root -
+# find_env_dir()/discover_env_dirs() are the only places that need to know this.
+AGENTS_DIR = REPO_ROOT / "agents"
+
+
+def find_env_dir(env):
+    """Resolve an env name (a `devcontainer.env` label value, e.g. "claude-agent" or
+    "java-toolbelt") to its directory - REPO_ROOT/<env> for a toolbelt,
+    AGENTS_DIR/<env> for an agent environment. Dies with a clear message if neither
+    exists, rather than handing a bogus path to `docker compose`."""
+    for base in (REPO_ROOT, AGENTS_DIR):
+        d = base / env
+        if (d / "docker-compose.yml").is_file() or (d / "docker-compose.yaml").is_file():
+            return d
+    die(f"'{env}' has no docker-compose.yml under {REPO_ROOT} or {AGENTS_DIR}.")
 
 
 def pick_from_list(label, items):
@@ -144,6 +160,49 @@ def cmd_logs(target, follow):
     subprocess.run(["docker", "exec", "-i", proxy_cid, *tail, "/var/log/squid/access.log"])
 
 
+# Which agent-login.sh subcommand each agent environment actually ships - see each
+# <env>/scripts/agent-login.sh. Used by cmd_login to catch a mismatch (e.g. `login claude`
+# against copilot-agent) before exec'ing in, with a clearer message than the container's own
+# "claude: command not found" would give.
+AGENT_LOGIN_TOOLS = {
+    "claude-agent": {"claude", "gh"},
+    "copilot-agent": {"gh"},
+}
+
+
+def cmd_login(target, tool):
+    """`login <claude|gh>` - run an agent environment's agent-login.sh for the stack mounted
+    from `target`. Only the `*-agent` environments ship that script (see AGENTS.md's
+    agent-sandbox note) - dies with a clear message for any other env, or for an agent/tool
+    combination that env doesn't actually ship (AGENT_LOGIN_TOOLS above). Interactive (the
+    login flow needs a real terminal and your browser), so this replaces the process
+    (os.execvpe) rather than subprocess.run, same rationale as start_and_open_shell's shell:
+    nothing of run.py lingers while you're going through it.
+
+    Both `claude` and `gh` run the same way - exec'd into the already-running `dev`
+    container, through this stack's usual whitelisted proxy. An earlier version ran `claude`
+    in a separate `network_mode: host` throwaway container instead, on the (wrong) assumption
+    that Claude Code's OAuth flow needed a local browser-redirect callback port - it actually
+    shows a URL and has you paste a one-time code back into the terminal yourself, no local
+    server involved, so that whole detour (and the Colima-specific breakage it caused - its
+    VM's "host" network isn't the Mac's) is gone. See git history for that version."""
+    project, env, workspace = resolve_stack(target)
+    if env not in AGENT_LOGIN_TOOLS:
+        die(f"'{env}' isn't an agent environment - agent-login.sh only exists in {sorted(AGENT_LOGIN_TOOLS)} (stack: {project}).")
+    if tool not in AGENT_LOGIN_TOOLS[env]:
+        die(f"'{env}' doesn't ship a '{tool}' login - it only supports {sorted(AGENT_LOGIN_TOOLS[env])}.")
+
+    compose_dir = find_env_dir(env)
+    env_vars, compose = _compose_runner(compose_dir, project, [PROXY_COMPOSE, CONTAINER_NAME_COMPOSE], VOLUME=workspace)
+
+    if not compose("ps", "--status", "running", "-q", "dev", capture_output=True, text=True).stdout.strip():
+        die(f"'{env}' (project {project}) isn't running - './run.py' (Stacks tab, 'o') to start it first.")
+
+    print(f"🔐 Running agent-login.sh {tool} in '{env}' (project {project}) …", flush=True)
+    os.chdir(compose_dir)
+    os.execvpe("docker", ["docker", "compose", "exec", "-ti", "-u", "ubuntu", "dev", "agent-login.sh", tool], env_vars)
+
+
 # ---------------------------------------------------------------------------
 # Environment for every docker/compose subprocess: proxy.env + GITHUB_TOKEN.
 # ---------------------------------------------------------------------------
@@ -164,9 +223,18 @@ def build_env():
     (both cases) if present, plus GITHUB_TOKEN (falling back to GH_TOKEN, always present even
     if empty so compose's `secrets.environment` lookup never fails on an unset var). Raises the
     unauthenticated api.github.com rate limit (60 req/hr per IP) used when resolving "latest"
-    tool versions; passed to builds as a BuildKit secret, never baked into image layers."""
+    tool versions; passed to builds as a BuildKit secret, never baked into image layers.
+
+    Also PROXY_BUILD_CONTEXT/PROXY_WHITELIST_DIR, always as absolute paths - see
+    common/proxy.docker-compose.yml's top comment. Compose resolves a merged file's own
+    relative paths against the FIRST -f file's directory, which is <env>/docker-compose.yml
+    at a depth (one level under the repo root for a toolbelt, two for an agent environment
+    under agents/) that proxy.docker-compose.yml's relative defaults can't account for by
+    themselves; an absolute path here sidesteps that rule entirely regardless of depth."""
     env = {**os.environ, **_load_proxy_env()}
     env["GITHUB_TOKEN"] = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    env["PROXY_BUILD_CONTEXT"] = str(REPO_ROOT / "common" / "proxy")
+    env["PROXY_WHITELIST_DIR"] = str(REPO_ROOT / "common" / "proxy" / "whitelist.d")
     return env
 
 
@@ -224,14 +292,27 @@ def ensure_base_image(rebuild, debug, env):
 
 # ---------------------------------------------------------------------------
 # Discovery: every immediate subdirectory of the repo root with a
-# docker-compose.yml/.yaml; base-toolbelt sorts first.
+# docker-compose.yml/.yaml (toolbelts), plus every immediate subdirectory of
+# agents/ (agent environments - `*-agent`, see AGENTS.md's agent-sandbox
+# note, kept out of the repo root so they're not mistaken for toolbelts) -
+# toolbelts first (base-toolbelt pinned first within that group), then agent
+# environments, alphabetical within each group. Used by the "+ New stack"
+# modal (devtool/proxy.py's _new_stack_modal) to group the picker into
+# "Toolbelts"/"Agents" sections.
 # ---------------------------------------------------------------------------
+def env_category(name):
+    return "Agents" if name.endswith("-agent") else "Toolbelts"
+
+
 def discover_env_dirs():
+    roots = [REPO_ROOT] + ([AGENTS_DIR] if AGENTS_DIR.is_dir() else [])
     dirs = sorted(
-        child for child in REPO_ROOT.iterdir()
+        child
+        for root in roots
+        for child in root.iterdir()
         if child.is_dir() and ((child / "docker-compose.yml").is_file() or (child / "docker-compose.yaml").is_file())
     )
-    return sorted(dirs, key=lambda d: d.name != "base-toolbelt")
+    return sorted(dirs, key=lambda d: (env_category(d.name) == "Agents", d.name != "base-toolbelt", d.name))
 
 
 # ---------------------------------------------------------------------------

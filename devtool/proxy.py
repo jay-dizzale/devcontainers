@@ -871,7 +871,7 @@ class OverviewApp:
         s = self._selected(TAB_STACKS)
         if not s:
             return None
-        self.pending_action = (REPO_ROOT / s["env"], s["workspace"])
+        self.pending_action = (launcher.find_env_dir(s["env"]), s["workspace"])
         return False
 
     def _new_stack(self, stdscr):
@@ -898,7 +898,8 @@ class OverviewApp:
         (`self.env` not among the choices - always true for `cmd_run`, which has no active
         stack), preselected - so confirming it is the obvious thing to do instead of a blind
         Enter. This is not a separate code path: `compose_dir` for that entry is the same
-        `REPO_ROOT/<env>` a brand-new pick for that toolbelt would use, and
+        directory (`launcher.discover_env_dirs()`'s entry for it - REPO_ROOT/<env> for a
+        toolbelt, agents/<env> for an agent environment) a brand-new pick for that env would use, and
         `launcher.start_and_open_shell` already reconnects to a stack whose env+workspace
         labels match rather than starting a redundant second one - the tag only makes that
         existing behavior visible instead of something you had to already know."""
@@ -955,7 +956,26 @@ class OverviewApp:
         h, w = stdscr.getmaxyx()
         box_w = max(40, min(64, w - 4))
         inner_w = box_w - 4
-        n_visible = max(1, min(len(names), h - 10))
+
+        # Group into "Toolbelts"/"Agents" sections (launcher.discover_env_dirs already
+        # sorts `names` so each category's entries are contiguous) - same header-line
+        # pattern as the Global Whitelist tab's Common/Specific grouping
+        # (_draw_whitelist_tab): header lines aren't part of the selectable row list, so
+        # `idx` still indexes straight into `names`; they just cost the visible window 1-2
+        # extra lines, so scrolling has to work in display-line space via `selected_line`.
+        lines = []  # ("header", label) | ("row", real_index)
+        last_category = None
+        selected_line = 0
+        for i, name in enumerate(names):
+            category = launcher.env_category(name)
+            if category != last_category:
+                lines.append(("header", category))
+                last_category = category
+            if i == idx:
+                selected_line = len(lines)
+            lines.append(("row", i))
+
+        n_visible = max(1, min(len(lines), h - 10))
         box_h = min(7 + n_visible, h - 2)
         y0 = max(0, (h - box_h) // 2)
         x0 = max(0, (w - box_w) // 2)
@@ -964,9 +984,14 @@ class OverviewApp:
 
         list_top = y0 + 2
         # Keep the selection in view when the list is taller than the box.
-        first = max(0, min(idx - n_visible + 1, len(names) - n_visible)) if idx >= n_visible else 0
-        for i, name in enumerate(names[first : first + n_visible]):
-            line_i = first + i
+        first = max(0, min(selected_line - n_visible + 1, len(lines) - n_visible)) if selected_line >= n_visible else 0
+        for row_i, line in enumerate(lines[first : first + n_visible]):
+            y = list_top + row_i
+            if line[0] == "header":
+                _safe_addnstr(stdscr, y, x0 + 2, line[1], inner_w, curses.color_pair(3) | curses.A_DIM)
+                continue
+            _, line_i = line
+            name = names[line_i]
             cursor = "→ " if line_i == idx else "  "
             if line_i == idx:
                 attr = curses.A_REVERSE if focus == "type" else (curses.color_pair(4) | curses.A_BOLD)
@@ -978,7 +1003,7 @@ class OverviewApp:
                 label += "  (running here)" if state == "running" else f"  ({state} here)"
                 if line_i != idx:
                     attr = curses.color_pair(1) if state == "running" else curses.color_pair(2)
-            _safe_addnstr(stdscr, list_top + i, x0 + 2, f"{cursor}{label}", inner_w, attr)
+            _safe_addnstr(stdscr, y, x0 + 2, f"{cursor}{label}", inner_w, attr)
 
         folder_row = list_top + n_visible + 1
         label = "Folder: "

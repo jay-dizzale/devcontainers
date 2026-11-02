@@ -39,6 +39,13 @@ designed to host coding agents, agent harnesses, or LLM front-ends, so none are 
 or mounted in. To run an agent against your code in isolation, use a purpose-built
 sandbox such as [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) instead.
 
+The one exception: `agents/claude-agent` and `agents/copilot-agent` (DRAFT) are
+purpose-built, isolated sandboxes for running Claude Code or the GitHub Copilot CLI,
+for hosts where Docker Sandboxes itself isn't available (it needs nested
+virtualization). They're kept out of the **Available environments** table above since
+they aren't toolbelts - see [`AGENTS.md`](AGENTS.md)'s Guardrails section for the full
+scope of this exception.
+
 ## The common base
 
 Everything in `common/` is shared by all environments (`common/base.docker-compose.yml`

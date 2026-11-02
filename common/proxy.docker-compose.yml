@@ -9,9 +9,19 @@
 # file's directory, not each file's own directory (verified empirically -
 # see AGENTS.md). The first file is always <env>/docker-compose.yml (run.py
 # runs `docker compose` with cwd set there; devcontainer.json lists it first
-# too), so paths here are
-# written as if relative to <env>/, matching common/base.docker-compose.yml's
-# existing `../common/.zshrc` mount.
+# too) - but "<env>/" isn't a fixed depth: toolbelts sit one level below the
+# repo root (<toolbelt>/docker-compose.yml, so "../common/proxy" reaches
+# common/), while agent environments sit one level deeper
+# (agents/<agent>/docker-compose.yml, needing "../../common/proxy" instead).
+# A single relative default can't be right for both, so the two paths below
+# are parameterized - PROXY_BUILD_CONTEXT/PROXY_WHITELIST_DIR - with
+# defaults that keep the existing one-level-deep behavior for toolbelts
+# (unparameterized manual invocation, matching common/base.docker-compose.yml's
+# `../common/.zshrc` mount) while devtool/launcher.py always exports both as
+# absolute paths, which sidesteps the relative-resolution rule entirely
+# regardless of how deep <env>/ actually is. A manual invocation from an
+# agents/<agent>/ directory (see AGENTS.md's Commands section) must export
+# these two itself.
 #
 # `proxy` sits on the stack's ordinary default network, same as `dev` - no
 # `internal: true` split. That mechanism was tried and reverted: a container
@@ -22,7 +32,7 @@
 services:
   proxy:
     build:
-      context: ../common/proxy
+      context: ${PROXY_BUILD_CONTEXT:-../common/proxy}
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -38,7 +48,7 @@ services:
       # exclusive. Empty when proxy.env has nothing set.
       - UPSTREAM_PROXY=${HTTP_PROXY:-${HTTPS_PROXY:-}}
     volumes:
-      - ../common/proxy/whitelist.d:/etc/squid/whitelist.d:ro
+      - ${PROXY_WHITELIST_DIR:-../common/proxy/whitelist.d}:/etc/squid/whitelist.d:ro
       - proxy-logs:/var/log/squid
     healthcheck:
       # Not a raw TCP probe (nc -z) - that opens and closes the client port

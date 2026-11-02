@@ -1,0 +1,30 @@
+# copilot-agent (DRAFT, not a toolbelt - see AGENTS.md's agent-sandbox note).
+# Named without the `-toolbelt` suffix on purpose: this file follows every
+# other environment's "add your own whitelist.d/<env>.txt" convention
+# (AGENTS.md's "Adding a new environment", step 5), but copilot-agent
+# itself deliberately isn't a toolbelt.
+#
+# Merged into every stack's proxy like every other file here (see
+# common/proxy/entrypoint.sh) - these domains end up reachable from every
+# toolbelt, not just copilot-agent. Accepted: nothing in any other
+# toolbelt has a reason to use them, so this is a dormant allow-rule
+# elsewhere, not an active exposure - same tradeoff Kafka's Apache mirrors
+# already make for every toolbelt that isn't java-toolbelt.
+
+# GitHub - Copilot CLI's token exchange (rides on gh's own auth, see
+# copilot-agent/scripts/agent-login.sh), and `git push`/`fetch` against
+# the project directory mounted at /workspace. Repeated here rather than
+# shared with claude-agent.txt so each file is self-contained, same
+# precedent as the Kafka mirrors repeated across
+# java-toolbelt.txt/infrastructure-toolbelt.txt
+github.com
+api.github.com
+codeload.github.com
+objects.githubusercontent.com
+github-releases.githubusercontent.com
+
+# NOT VERIFIED: GitHub Copilot's actual completion/chat backend hostname(s).
+# Check copilot-agent's proxy access.log on a real `gh copilot` run and add
+# whatever it actually contacts (commonly something under
+# githubcopilot.com or copilot-proxy.githubusercontent.com as of this
+# writing, but confirm against the live log, not this comment).

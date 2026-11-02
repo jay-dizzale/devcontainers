@@ -1,0 +1,100 @@
+# DRAFT. Deliberately does NOT `extends: common/base.docker-compose.yml`'s
+# `base` service, unlike every toolbelt - that service also bind-mounts
+# ~/.config/tea, which doesn't belong here. Everything this service
+# actually needs is declared explicitly below instead of inherited.
+#
+# ACCEPTED RISK (explicit user decision): ${VOLUME} is mounted READ-WRITE
+# straight at /workspace, same as every toolbelt - no read-only mount +
+# internal `git clone` buffer in between (an earlier draft had one,
+# mirroring Docker Sandboxes' "clone mode" - see git history). A
+# misbehaving agent can therefore corrupt or delete the actual project
+# files directly, not just produce commits a human chooses to pull in.
+#
+# DOES use ../../common/proxy.docker-compose.yml: devtool/launcher.py's
+# PROXY_COMPOSE is hardcoded to that one file with no per-env override, so
+# `run.py`/`dev` was always going to use it regardless of any per-env
+# proxy variant. The domains this needs beyond the shared base are added
+# the normal way instead: common/proxy/whitelist.d/claude-agent.txt.
+#
+# Credentials are NOT reused from the host. You log in from inside this
+# container (agents/claude-agent/scripts/agent-login.sh, via `./run.py login
+# claude`/`./run.py login gh` - devtool/launcher.py's cmd_login) and that
+# session lives only in the agent-claude-home/agent-gh-config named
+# volumes below - isolated from the host, but also gone if those volumes
+# are ever removed (docker compose down -v), unlike a host-mounted
+# credential. gh (not just claude) needs its own login here too - `git
+# push`/`fetch` against /workspace uses it, independent of any agent CLI.
+#
+# `claude login` runs through the normal, already-running `dev` container
+# (exec'd the same way as `gh auth login`) and through this stack's usual
+# whitelisted proxy - an earlier draft instead ran it in a separate
+# `network_mode: host` throwaway container, reasoning that Claude Code's
+# OAuth flow needs a local browser-redirect callback port. That reasoning
+# was wrong: the actual flow shows a URL, you approve in the browser, and
+# paste a one-time code back into the terminal yourself - no local
+# server/port involved at all, just an outbound HTTPS call after you paste
+# it, same shape as everything else here. The host-networking version
+# also broke specifically under Colima (its VM's "host" network is not
+# your Mac's), which is what surfaced the wrong assumption - see git
+# history for that version.
+services:
+  dev:
+    build:
+      context: ../..
+      dockerfile: agents/claude-agent/Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+    image: claude-agent:latest
+    init: true
+    # Same root-then-drop pattern as every toolbelt (common/entrypoint.sh,
+    # inherited via common/Dockerfile's ENTRYPOINT) - needed for the same
+    # egress iptables allowlist, nothing agent-specific here.
+    user: root
+    cap_add:
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      proxy:
+        condition: service_healthy
+    labels:
+      - "devcontainer.env=claude-agent"
+      - "devcontainer.workspace=${VOLUME:-../../..}"
+    environment:
+      - LANG=en_US.UTF-8
+      - LANGUAGE=en_US:en
+      - LC_ALL=en_US.UTF-8
+      - HTTP_PROXY=http://proxy:3128
+      - HTTPS_PROXY=http://proxy:3128
+      - NO_PROXY=localhost,127.0.0.1
+      - http_proxy=http://proxy:3128
+      - https_proxy=http://proxy:3128
+      - no_proxy=localhost,127.0.0.1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Same shell config every toolbelt gets via `extends: base` - not
+      # inherited here since this doesn't `extends` at all (see the top
+      # comment), so it has to be listed explicitly. Harmless/useful as-is:
+      # its gh/tea credential-helper setup already no-ops cleanly when
+      # there's nothing to wire up (see common/zshrc-template), and
+      # correctly picks up whatever `run.py login gh` logged in as, once
+      # you have.
+      - ../../common/.zshrc:/home/ubuntu/.zshrc:ro
+      - ../../common/.history:/home/ubuntu/.history
+      - ${VOLUME:-../../..}:/workspace
+      # Isolated login sessions - see the credentials note above. Named
+      # volumes, not a host bind mount: survive a container restart,
+      # never touch any host directory.
+      - agent-claude-home:/home/ubuntu/.claude
+      - agent-gh-config:/home/ubuntu/.config/gh
+    command: ["/usr/local/bin/startup.sh"]
+
+volumes:
+  agent-claude-home:
+  agent-gh-config:

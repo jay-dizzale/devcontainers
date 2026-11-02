@@ -12,11 +12,14 @@ containerized development environment. Every toolbelt layers on a shared base de
 `common/`. The goal is reproducible toolchains that developers launch via `run.py` or VS
 Code Dev Containers.
 
-These environments are for a developer working in them directly - they are **not**
+These environments are for a developer working in them directly - the toolbelts are **not**
 designed to host coding agents, agent harnesses, or LLM front-ends/services (an
 `open-webui-service` once lived here and was removed for exactly this reason). Anyone who
 wants to run an agent against their code in isolation should use a purpose-built sandbox
-such as Docker Sandboxes instead; don't add such a workload here.
+such as Docker Sandboxes instead; don't add such a workload to a toolbelt. The one deliberate,
+narrowly-scoped exception - `agents/claude-agent/` and `agents/copilot-agent/`, for hosts where
+Docker Sandboxes isn't available - is covered in the Guardrails section below; it doesn't
+loosen this rule for anything else.
 
 There is **no application code to run or test here** - the "product" is the Docker
 images and the scripts that build them.
@@ -60,11 +63,16 @@ images and the scripts that build them.
 │   │   ├── install-trivy.sh      # Trivy (vulnerability/misconfig scanner)
 │   │   ├── motd.sh               # Installed as /usr/local/bin/motd by install-common.sh
 │   │   └── certs/                # Drop corporate CA certs here (contents gitignored)
-└── <env>/                        # One folder per environment, each with:
-    ├── Dockerfile                # FROM toolbelt-base:latest; runs only the env's own install scripts
-    ├── docker-compose.yml        # `extends` common base; some tool versions pinned via build args
-    ├── devcontainer.json         # VS Code Dev Containers entry point (most envs)
-    └── scripts/                  # Env-specific install-*.sh scripts
+├── <env>/                        # One folder per toolbelt, each with:
+│   ├── Dockerfile                # FROM toolbelt-base:latest; runs only the env's own install scripts
+│   ├── docker-compose.yml        # `extends` common base; some tool versions pinned via build args
+│   ├── devcontainer.json         # VS Code Dev Containers entry point (most envs)
+│   └── scripts/                  # Env-specific install-*.sh scripts
+└── agents/                       # Agent environments (`*-agent`, see Guardrails below) - kept
+    │                             # one level below the repo root, separate from the toolbelts,
+    │                             # so they're never mistaken for one.
+    ├── claude-agent/             # DRAFT - isolated sandbox for running Claude Code
+    └── copilot-agent/            # DRAFT - isolated sandbox for running the GitHub Copilot CLI
 ```
 
 ## How the pieces fit together
@@ -74,6 +82,9 @@ images and the scripts that build them.
   `java-toolbelt/docker-compose.yml`) - change it there, not in the Dockerfile.
 - Each `<env>/Dockerfile` uses **build context `..`** (the repo root), so it can `ADD`
   from both `common/` and the env folder. Keep that in mind when adding `ADD`/`COPY` paths.
+  An agent environment's Dockerfile (one level deeper, under `agents/`) uses `../..` instead
+  to reach the same repo root - its own `ADD`/`COPY` paths are written as `agents/<agent>/...`
+  accordingly (see the Guardrails section's agent-sandbox exception).
 - **The shared base is a local image, never pushed.** `common/Dockerfile` builds
   `toolbelt-base:latest` (`install-common.sh`;
   ends as `root`). Every `<env>/Dockerfile` is `FROM ${BASE_IMAGE}` (default
@@ -242,7 +253,17 @@ explicitly allowed, and every request (allowed or denied) is logged.
   `<env>/docker-compose.yml` (`run.py` runs `docker compose` with `cwd` set there;
   devcontainer.json lists it first too), so
   paths inside `common/proxy.docker-compose.yml` are written as `../common/proxy/...`, exactly
-  like the existing `../common/.zshrc` mount in `common/base.docker-compose.yml`.
+  like the existing `../common/.zshrc` mount in `common/base.docker-compose.yml` - both assume
+  `<env>/` is exactly one level below the repo root, which holds for every toolbelt but not for
+  an agent environment (`agents/<agent>/docker-compose.yml`, one level deeper). Rather than a
+  second copy of `proxy.docker-compose.yml` for that depth, its two depth-sensitive paths
+  (the `proxy` service's build context and its whitelist volume) are parameterized -
+  `${PROXY_BUILD_CONTEXT:-../common/proxy}` / `${PROXY_WHITELIST_DIR:-../common/proxy/whitelist.d}` -
+  and `devtool/launcher.py`'s `build_env()` always exports both as absolute paths, which
+  sidesteps the relative-resolution rule regardless of how deep `<env>/` is. The relative
+  defaults only matter for a manual invocation with neither var set, and stay tuned for a
+  toolbelt's one-level depth; a manual invocation from `agents/<agent>/` must export both
+  itself (see Commands below).
 - **Build-time traffic is *not* filtered** - `docker compose build` / image builds still use
   the pre-existing `proxy.env`-based `HTTP_PROXY`/`HTTPS_PROXY` build-arg passthrough
   (untouched), which can point at a real corporate proxy or nothing at all. If that build-time
@@ -575,7 +596,7 @@ explicitly allowed, and every request (allowed or denied) is logged.
 ./run.py stop -v /path/to/your/project
 ./run.py stop --all                  # every devcontainer stack, from any directory
 
-# Manually build/run a single environment without the launcher
+# Manually build/run a single toolbelt without the launcher
 # (the base image must exist first: `./run.py build-base`)
 # -f order matters: the FIRST file sets the project directory that every
 # merged file's relative paths resolve against (see AGENTS.md).
@@ -583,6 +604,16 @@ cd <env>
 docker compose -f docker-compose.yml -f ../common/proxy.docker-compose.yml up -d --build
 docker compose exec -ti -u ubuntu dev zsh   # service is always `dev`; -u ubuntu - see Conventions
 docker compose down -v               # tear down
+
+# Same, for an agent environment (one level deeper, under agents/) - the extra ".."
+# on the -f path, and PROXY_BUILD_CONTEXT/PROXY_WHITELIST_DIR exported so
+# proxy.docker-compose.yml's own relative paths resolve correctly at this depth
+# (see the Compose path-resolution gotcha above; run.py sets both for you).
+cd agents/<agent>
+PROXY_BUILD_CONTEXT=../../common/proxy PROXY_WHITELIST_DIR=../../common/proxy/whitelist.d \
+  docker compose -f docker-compose.yml -f ../../common/proxy.docker-compose.yml up -d --build
+docker compose exec -ti -u ubuntu dev zsh
+docker compose down -v
 ```
 
 After `./run.py setup`, every `run.py` subcommand is also available as `dev ...`
@@ -619,29 +650,126 @@ environment's image (`docker compose build` in that env's directory).
 
 ## Adding a new environment
 
+This section covers a new **toolbelt** - one level below the repo root. A new **agent**
+environment follows the same steps one level deeper, under `agents/<name>-agent/` instead
+(see the Guardrails section's agent-sandbox exception), with every `../common/...` path below
+written as `../../common/...` instead (see the Compose path-resolution gotcha above).
+
 1. Create `<env>/Dockerfile`, `<env>/docker-compose.yml` (extending the common base),
    `<env>/devcontainer.json`, and `<env>/scripts/`.
 2. If the tool's version should be pinnable, wire a `<TOOL>_VERSION` build `arg`.
-3. `run.py` auto-discovers any folder containing a `docker-compose.yml` - no launcher
-   changes needed.
+3. `run.py` auto-discovers any folder containing a `docker-compose.yml` directly under the
+   repo root, plus any such folder under `agents/` - no launcher changes needed either way.
 4. Set `<env>/devcontainer.json`'s `dockerComposeFile` to
    `["docker-compose.yml", "../common/proxy.docker-compose.yml"]` (see "Egress proxy and
    domain whitelist" above) so VS Code gets the same network enforcement `run.py` does.
-5. Add `common/proxy/whitelist.d/<env>-toolbelt.txt` listing any domains this environment's tools
-   need beyond `00-common.txt` (even an empty, comment-only file documenting "nothing extra
-   needed" is expected).
-6. Add a row to the **Available environments** table in `README.md`.
+5. Add `common/proxy/whitelist.d/<env>-toolbelt.txt` (an agent environment's is named
+   `<env>-agent.txt` instead - see `claude-agent.txt`/`copilot-agent.txt`) listing any domains
+   this environment's tools need beyond `00-common.txt` (even an empty, comment-only file
+   documenting "nothing extra needed" is expected).
+6. Add a row to the **Available environments** table in `README.md` - **toolbelts only**. That
+   table is framed around "every environment builds on the common base and adds its own tools
+   on top," which doesn't describe an agent sandbox; `claude-agent`/`copilot-agent` are
+   intentionally left out of it (see README's own "Not for AI agents" section) and documented
+   instead by the Guardrails section's agent-sandbox exception.
 
 ## Guardrails
 
 - **Do not commit secrets or credentials.** Host secrets (`~/.aws`, `~/.azure`,
   `~/.terraform.d`, `~/.spacelift`, `~/.m2`, gh/tea config)
   are provided at **runtime via volume mounts**, never baked into images.
-- **Do not add coding-agent CLIs (Claude Code, Copilot CLI, opencode, etc.) back
-  into the images** - no install scripts, no `~/.claude`/`~/.copilot`/`~/.config/opencode`-style
+- **Do not add coding-agent CLIs (Claude Code, Copilot CLI, opencode, etc.) to any
+  `-toolbelt` image** - no install scripts, no `~/.claude`/`~/.copilot`/`~/.config/opencode`-style
   volume mounts. These environments intentionally run without agent binaries or
   agent state mounted in. The same goes for agent harnesses and LLM services (Open WebUI,
   Ollama plumbing, etc.) - point users at Docker Sandboxes instead.
+  **One deliberate, scoped exception: `agents/claude-agent/` and
+  `agents/copilot-agent/` (DRAFT).** Docker Sandboxes needs nested
+  virtualization, which isn't available on every host this repo runs on -
+  where that's true, there is no purpose-built alternative to point users
+  at. These are from-scratch second products living in this repo to cover
+  that gap, not toolbelts with an agent bolted on: neither `extend`s
+  `common/base.docker-compose.yml`'s `base` service (so `~/.config/tea`
+  doesn't reach either), but both mount `${VOLUME}` read-write at
+  `/workspace` just like every toolbelt - see the ACCEPTED RISK notes below
+  for what that and the other departures from a toolbelt's isolation
+  actually mean here. **Two separate environments, not one**: installing
+  every agent CLI by default in a single image was specifically what this
+  split avoids - `claude-agent` ships only Claude Code, `copilot-agent`
+  ships only the GitHub Copilot CLI (as a `gh` extension; no Node.js in that
+  image either, since it's a Go binary, not an npm package).
+
+  They're kept under their own `agents/` subdirectory, one level below the
+  repo root rather than directly in it like every toolbelt - so they're
+  never mistaken for one when browsing the repo. `devtool/launcher.py`'s
+  `discover_env_dirs()` scans both the repo root (toolbelts) and `agents/`
+  (agent environments) for this reason, and `find_env_dir()` resolves an env
+  name back to whichever of the two actually holds it (e.g. for
+  `./run.py login`). They're also named `*-agent` (not `*-toolbelt`)
+  deliberately, independent of that placement - `devtool/launcher.py`'s
+  `env_category()` groups the "+ New stack" modal (`devtool/proxy.py`'s
+  `_new_stack_modal`) into "Toolbelts"/"Agents" sections on exactly that
+  suffix, same header-line pattern as the Global Whitelist tab's
+  Common/Specific grouping.
+
+  Both DO use `common/proxy.docker-compose.yml` like every other
+  environment - `devtool/launcher.py`'s `PROXY_COMPOSE` is hardcoded to that
+  one file with no per-env override, so a standalone proxy variant would
+  only ever have been picked up by a manual `docker compose -f ...` or VS
+  Code, never by `run.py`/`dev` itself. Being one level deeper than a
+  toolbelt breaks that shared file's own relative paths under the Compose
+  path-resolution gotcha above - fixed there via
+  `PROXY_BUILD_CONTEXT`/`PROXY_WHITELIST_DIR`, not by giving agents their own
+  proxy compose file. Their own domains are added the normal way instead:
+  `common/proxy/whitelist.d/claude-agent.txt` and `copilot-agent.txt`,
+  following the same "Adding a new environment" step every toolbelt uses
+  (even though neither is a toolbelt) rather than inventing a second
+  mechanism.
+
+  **Credentials are never reused from the host.** You log in from inside
+  the container (`agents/<env>/scripts/agent-login.sh`, run via
+  `./run.py login claude`/`./run.py login gh` -
+  `devtool/launcher.py`'s `cmd_login`) and that session lives only in named
+  volumes (`agent-claude-home`, `agent-gh-config`) - isolated from the host,
+  gone if those volumes are ever removed (`docker compose down -v`). `gh`
+  login covers both the Copilot CLI (which rides on `gh`'s own auth, no
+  separate step) and `git push`/`fetch` against `/workspace`, independent of
+  either agent CLI, so both environments need it - `claude-agent` needs
+  Claude Code's login on top of that.
+
+  Both `claude login` and `gh auth login` run the same way: `exec`'d into
+  the already-running `dev` container (`cmd_login`, same mechanism as
+  opening a shell), through this stack's usual whitelisted proxy - neither
+  needs a local callback port. An earlier draft ran `claude login` in a
+  second, throwaway `network_mode: host` service instead, on the
+  assumption that Claude Code's OAuth flow needed a local browser-redirect
+  callback port; that assumption was wrong (it shows a URL and has you
+  paste a one-time code back into the terminal yourself, no local server
+  involved) and the host-networking version broke outright under Colima
+  specifically, whose VM's "host" network isn't the Mac's - see git
+  history for that version if a future CLI version genuinely does need a
+  local callback and this needs resurrecting.
+
+  **ACCEPTED RISK, explicit user decision:** `${VOLUME}` is mounted
+  **read-write** straight at `/workspace`, with no read-only mount +
+  internal `git clone` buffer in between (an earlier design had one,
+  mirroring Docker Sandboxes' "clone mode"). A misbehaving agent can
+  therefore corrupt or delete the actual project files directly, not just
+  produce commits a human chooses to pull in later.
+
+  What still contains that risk (and the Anthropic/GitHub credential's
+  authority, once logged in): the egress whitelist
+  (`common/proxy/whitelist.d/claude-agent.txt`/`copilot-agent.txt`) is a
+  plain, non-intercepting proxy scoped to only the few domains these CLIs
+  need, for `dev` itself - nothing in it, including code the agent itself
+  writes and runs, can reach any other domain to exfiltrate a logged-in
+  identity or anything else it can reach on disk. This is the same
+  containment model this repo already accepts for every toolbelt's `gh`
+  token (see the egress-proxy section above), just carrying a bigger
+  consequence here if it's ever misused, since these containers run an
+  agent rather than code a human is directly typing, and now also have
+  direct write access to the real project. Keep this exception exactly that
+  scoped: do not add an agent CLI to any other environment in this repo.
 - **Do not run `docker compose down -v`, `docker system prune`, or delete images/volumes**
   unless the user explicitly asks - these destroy running environments and state.
 - **Do not bump pinned versions unprompted.** Version changes are deliberate.
