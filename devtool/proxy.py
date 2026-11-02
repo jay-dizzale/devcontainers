@@ -595,8 +595,10 @@ class OverviewApp:
     def _draw_stacks_tab(self, stdscr, top, height, x0, w):
         """One bordered card per stack, plus a trailing "+ New stack" pseudo-card (Enter on it
         = 'n'). Border color = the stack's own container state (green running, red otherwise,
-        also spelled out top-left); env type top-right and the VS Code badge bottom-left (see
-        _card_border). Inside: ➤ active marker, "ID: <id>", the proxy's state right-aligned,
+        also spelled out top-left); env type top-right (prefixed with 🤖 for an agent
+        environment, same distinction as the "+ New stack" modal's Toolbelts/Agents grouping)
+        and the VS Code badge bottom-left (see _card_border). Inside: ➤ active marker,
+        "ID: <id>", the proxy's state right-aligned,
         then FOLDER on its own two lines (a path needs the full width). Ports live in the Ports
         tab instead. Selection is a heavy border - shape, not color, since color is taken."""
         rows = self.rows[TAB_STACKS]
@@ -616,7 +618,8 @@ class OverviewApp:
             else:
                 container_up = rows[row_i]["container_state"] == "running"
                 border_attr = curses.color_pair(1 if container_up else 2) | (curses.A_BOLD if selected else 0)
-                label = rows[row_i]["env"]
+                env_name = rows[row_i]["env"]
+                label = f"🤖 {env_name}" if launcher.env_category(env_name) == "Agents" else env_name
             bottom_label = "🖥️ VS Code" if (not is_new_row and rows[row_i]["in_vscode"]) else None
             try:
                 _safe_addnstr(stdscr, y, x0 + 1, self._card_border(card_w, box, True, label), card_w, border_attr)
@@ -969,7 +972,8 @@ class OverviewApp:
         for i, name in enumerate(names):
             category = launcher.env_category(name)
             if category != last_category:
-                lines.append(("header", category))
+                header = f"🤖 {category}" if category == "Agents" else category
+                lines.append(("header", header))
                 last_category = category
             if i == idx:
                 selected_line = len(lines)
@@ -997,7 +1001,7 @@ class OverviewApp:
                 attr = curses.A_REVERSE if focus == "type" else (curses.color_pair(4) | curses.A_BOLD)
             else:
                 attr = curses.A_NORMAL
-            label = name
+            label = f"🤖 {name}" if launcher.env_category(name) == "Agents" else name
             state = (running_here or {}).get(name)
             if state is not None:
                 label += "  (running here)" if state == "running" else f"  ({state} here)"
