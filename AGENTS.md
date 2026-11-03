@@ -696,8 +696,13 @@ written as `../../common/...` instead (see the Compose path-resolution gotcha ab
   actually mean here. **Two separate environments, not one**: installing
   every agent CLI by default in a single image was specifically what this
   split avoids - `claude-agent` ships only Claude Code, `copilot-agent`
-  ships only the GitHub Copilot CLI (as a `gh` extension; no Node.js in that
-  image either, since it's a Go binary, not an npm package).
+  ships only the GitHub Copilot CLI (the standalone `copilot` binary,
+  installed via GitHub's own install script - see
+  `agents/copilot-agent/scripts/install-copilot-cli.sh`; the old
+  `gh-copilot` extension this previously installed is retired and now
+  collides with a built-in `gh copilot` command; no Node.js in that image
+  either, since the install script path doesn't need it, unlike the npm
+  package GitHub also offers for this CLI).
 
   They're kept under their own `agents/` subdirectory, one level below the
   repo root rather than directly in it like every toolbelt - so they're

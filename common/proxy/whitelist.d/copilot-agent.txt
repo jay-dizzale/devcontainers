@@ -23,8 +23,19 @@ codeload.github.com
 objects.githubusercontent.com
 github-releases.githubusercontent.com
 
+# Install-time: the standalone Copilot CLI (install-copilot-cli.sh runs
+# GitHub's own `curl https://gh.io/copilot-install | bash` - the old
+# `gh-copilot` extension this used to be is retired). NOT VERIFIED against
+# a live access.log - gh.io is GitHub's URL shortener the install one-liner
+# redirects through, and release-assets.githubusercontent.com is GitHub's
+# newer release-asset CDN host alongside objects.githubusercontent.com
+# above. Confirm both against copilot-agent's proxy access.log on a real
+# build and prune whichever turns out unused.
+gh.io
+release-assets.githubusercontent.com
+
 # NOT VERIFIED: GitHub Copilot's actual completion/chat backend hostname(s).
-# Check copilot-agent's proxy access.log on a real `gh copilot` run and add
+# Check copilot-agent's proxy access.log on a real `copilot` run and add
 # whatever it actually contacts (commonly something under
 # githubcopilot.com or copilot-proxy.githubusercontent.com as of this
 # writing, but confirm against the live log, not this comment).

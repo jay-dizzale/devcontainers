@@ -10,8 +10,10 @@
 #
 # Claude Code is a SEPARATE environment (../claude-agent) on purpose -
 # installing both agent CLIs by default in one image was the thing being
-# avoided here. No Node.js here either - the Copilot CLI is a `gh`
-# extension (a Go binary), not an npm package.
+# avoided here. No Node.js here either - the standalone Copilot CLI (see
+# install-copilot-cli.sh; the old `gh-copilot` extension is retired) is
+# installed as a prebuilt binary via GitHub's own install script, not the
+# npm package GitHub also offers.
 ARG BASE_IMAGE=toolbelt-base:latest
 FROM ${BASE_IMAGE}
 
