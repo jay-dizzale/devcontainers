@@ -406,6 +406,10 @@ class OverviewApp:
     Whitelist/Custom Whitelist/Access log, switchable via their own sub-tab bar) on the
     right 3/5. Exactly one pane has input focus at a time (self.focus); Tab/←/→ moves focus."""
 
+    _BODY_TOP = 4  # rows consumed above the body (title + pane labels + sub-tab bar) - draw()
+    # and the PageUp/PageDown handler in handle_key must agree on this to compute the same
+    # page size the body is actually drawn with.
+
     def __init__(self, cid, env, project, workspace, target_dir):
         self.cid = cid
         self.env = env
@@ -505,7 +509,7 @@ class OverviewApp:
             _safe_addnstr(stdscr, 2, x, title, max(0, right_x + right_w - x), attr)
             x += len(title) + 1
 
-        body_top = 4
+        body_top = self._BODY_TOP
         body_h = h - body_top - 2
         for y in range(1, body_top + body_h):
             try:
@@ -542,7 +546,7 @@ class OverviewApp:
             return f"↑/↓ select · n new (common/env, tracked) · b remove · {sub}{common}"
         if tab == TAB_CUSTOM:
             return f"↑/↓ select · n new (local.txt) · b remove · {sub}{common}"
-        return f"↑/↓ scroll · c clear log · {sub}{common}"
+        return f"↑/↓ scroll · PgUp/PgDn page · c clear log · {sub}{common}"
 
     def _visible_window(self, tab, n_rows, height, lines_per_row=1, header_rows=1, idx=None):
         """Clamp-to-view scrolling: keeps self.idx[tab] inside [scroll, scroll+visible)
@@ -780,6 +784,10 @@ class OverviewApp:
             _safe_addnstr(stdscr, top, x0 + 2, "(no traffic logged yet)", max(0, w - 2))
             return
         visible = height
+        # Reserve the rightmost column for the scrollbar (see _draw_scrollbar) - without it,
+        # a long log (thousands of lines, easy with a chatty tool) gives no sense of where
+        # the current view sits, short of counting "scrolled back N" against the total.
+        text_w = max(0, w - 1)
         end = len(rows) - self.log_offset
         start = max(0, end - visible)
         for row_i, r in enumerate(rows[start:end]):
@@ -788,9 +796,27 @@ class OverviewApp:
             denied = "DENIED" in r["code"]
             text = f"{ts}  {r['method']:<8} {r['host']:<35} {r['code']}"
             attr = curses.color_pair(2) if denied else curses.color_pair(1)
-            _safe_addnstr(stdscr, y, x0 + 2, text, max(0, w - 2), attr)
+            _safe_addnstr(stdscr, y, x0 + 2, text, max(0, text_w - 2), attr)
         if self.log_offset > 0:
-            _safe_addnstr(stdscr, top + visible, x0 + 2, f"-- scrolled back {self.log_offset} - ↓ to catch up --", max(0, w - 2), curses.color_pair(3) | curses.A_DIM)
+            _safe_addnstr(stdscr, top + visible, x0 + 2, f"-- scrolled back {self.log_offset} - ↓ to catch up --", max(0, text_w - 2), curses.color_pair(3) | curses.A_DIM)
+        self._draw_scrollbar(stdscr, top, height, x0 + w - 1, len(rows), start, end - start)
+
+    @staticmethod
+    def _draw_scrollbar(stdscr, top, height, x, n_rows, start, visible_count):
+        """A one-column vertical scrollbar at `x`: a dim track the full height of the pane,
+        with a brighter thumb marking which slice [start, start+visible_count) of `n_rows`
+        total rows is currently on screen. Skipped entirely when everything already fits -
+        a full-height thumb would just be noise with nothing to scroll to."""
+        if height <= 0 or n_rows <= visible_count:
+            return
+        thumb_h = max(1, height * visible_count // n_rows)
+        max_top = height - thumb_h
+        thumb_top = max(0, min(max_top, round(start * max_top / (n_rows - visible_count))))
+        for row in range(height):
+            on_thumb = thumb_top <= row < thumb_top + thumb_h
+            ch = "█" if on_thumb else "│"
+            attr = curses.color_pair(3) | (curses.A_BOLD if on_thumb else curses.A_DIM)
+            _safe_addnstr(stdscr, top + row, x, ch, 1, attr)
 
     # -- input ----------------------------------------------------------
     def _bindings(self, stdscr):
@@ -828,6 +854,10 @@ class OverviewApp:
             self.proxy_tab = PROXY_TABS[key - ord("1")]
         elif key in (curses.KEY_UP, curses.KEY_DOWN):
             self._move(-1 if key == curses.KEY_UP else 1)
+        elif key in (curses.KEY_PPAGE, curses.KEY_NPAGE):
+            h, _ = stdscr.getmaxyx()
+            page = max(1, h - self._BODY_TOP - 2)  # same body-height math as draw()
+            self._move(-page if key == curses.KEY_PPAGE else page)
         elif key in (10, 13, curses.KEY_ENTER) and tab == TAB_STACKS:
             if self.idx[TAB_STACKS] == len(self.rows[TAB_STACKS]):  # the "+ New stack" row
                 return self._new_stack(stdscr) is not False
@@ -1266,6 +1296,13 @@ _ARROW_BY_FINAL_BYTE = {
     ord("D"): curses.KEY_LEFT,
 }
 
+# Page Up/Down arrive as the longer `ESC [ <digit> ~` form (vs. arrows' `ESC [ <letter>`),
+# keyed here by that digit - same reassembly problem as the arrows, see _read_key.
+_TILDE_SEQ_BY_DIGIT = {
+    ord("5"): curses.KEY_PPAGE,
+    ord("6"): curses.KEY_NPAGE,
+}
+
 
 class _TerminalGone(Exception):
     """The controlling terminal went away (window closed, SSH dropped) - see _getch."""
@@ -1302,13 +1339,14 @@ def _getch(stdscr):
 
 
 def _read_key(stdscr):
-    """stdscr.getch() wrapper that manually reassembles `ESC [ <letter>` arrow-key
-    sequences. With stdscr.timeout() set (needed here for the idle refresh tick), ncurses'
-    own keypad(True) escape-sequence disambiguation does not reliably combine them into
-    KEY_UP/KEY_DOWN/KEY_LEFT/KEY_RIGHT in this environment - confirmed via an isolated
-    repro (arrow key arrives as three separate getch() calls: 27, '[', then the final
-    letter) that persisted even after curses.set_escdelay(). This reassembly is the actual
-    fix; a bare lone ESC (nothing follows within the timeout window) is returned as-is.
+    """stdscr.getch() wrapper that manually reassembles `ESC [ <letter>` arrow-key and
+    `ESC [ <digit> ~` Page Up/Down sequences. With stdscr.timeout() set (needed here for the
+    idle refresh tick), ncurses' own keypad(True) escape-sequence disambiguation does not
+    reliably combine them into KEY_UP/KEY_DOWN/KEY_LEFT/KEY_RIGHT/KEY_PPAGE/KEY_NPAGE in this
+    environment - confirmed via an isolated repro (arrow key arrives as three separate
+    getch() calls: 27, '[', then the final letter) that persisted even after
+    curses.set_escdelay(). This reassembly is the actual fix; a bare lone ESC (nothing
+    follows within the timeout window) is returned as-is.
     """
     key = _getch(stdscr)
     if key != 27:
@@ -1317,6 +1355,9 @@ def _read_key(stdscr):
     if k2 != ord("["):
         return key if k2 == -1 else k2
     k3 = _getch(stdscr)
+    if k3 in _TILDE_SEQ_BY_DIGIT:
+        k4 = _getch(stdscr)
+        return _TILDE_SEQ_BY_DIGIT[k3] if k4 == ord("~") else key
     return _ARROW_BY_FINAL_BYTE.get(k3, key)
 
 
