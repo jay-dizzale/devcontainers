@@ -779,6 +779,14 @@ class OverviewApp:
             _safe_addnstr(stdscr, y, x0 + 2, text, max(0, w - 2), attr)
 
     def _draw_log_tab(self, stdscr, top, height, x0, w):
+        """Newest entry at the top, oldest at the bottom (reverse of the raw, oldest-first
+        `parse_access_log` order `self.rows[TAB_LOG]` is stored in) - self.log_offset counts
+        rows down from that live/newest top, so it stays correct as new traffic keeps
+        extending the *bottom* of the underlying log, same as index-0-from-the-top holding
+        steady under a prepend. `_move` clamps it to `max(0, n - visible)`, so the top is
+        always a full page (can't scroll past offset 0) and the oldest-entries end is too
+        (no partial page with the bottom rows just missing, which a naive `len(rows) - 1`
+        cap used to allow)."""
         rows = self.rows[TAB_LOG]
         if not rows:
             _safe_addnstr(stdscr, top, x0 + 2, "(no traffic logged yet)", max(0, w - 2))
@@ -788,9 +796,11 @@ class OverviewApp:
         # a long log (thousands of lines, easy with a chatty tool) gives no sense of where
         # the current view sits, short of counting "scrolled back N" against the total.
         text_w = max(0, w - 1)
-        end = len(rows) - self.log_offset
-        start = max(0, end - visible)
-        for row_i, r in enumerate(rows[start:end]):
+        newest_first = rows[::-1]
+        n = len(newest_first)
+        start = min(self.log_offset, max(0, n - visible))
+        end = min(n, start + visible)
+        for row_i, r in enumerate(newest_first[start:end]):
             y = top + row_i
             ts = time.strftime("%H:%M:%S", time.localtime(r["ts"]))
             denied = "DENIED" in r["code"]
@@ -798,8 +808,8 @@ class OverviewApp:
             attr = curses.color_pair(2) if denied else curses.color_pair(1)
             _safe_addnstr(stdscr, y, x0 + 2, text, max(0, text_w - 2), attr)
         if self.log_offset > 0:
-            _safe_addnstr(stdscr, top + visible, x0 + 2, f"-- scrolled back {self.log_offset} - ↓ to catch up --", max(0, text_w - 2), curses.color_pair(3) | curses.A_DIM)
-        self._draw_scrollbar(stdscr, top, height, x0 + w - 1, len(rows), start, end - start)
+            _safe_addnstr(stdscr, top + visible, x0 + 2, f"-- scrolled back {self.log_offset} - ↑ to catch up --", max(0, text_w - 2), curses.color_pair(3) | curses.A_DIM)
+        self._draw_scrollbar(stdscr, top, height, x0 + w - 1, n, start, end - start)
 
     @staticmethod
     def _draw_scrollbar(stdscr, top, height, x, n_rows, start, visible_count):
@@ -841,6 +851,8 @@ class OverviewApp:
     def handle_key(self, stdscr, key):
         self.message = ""
         tab = self.current_tab()
+        h, _ = stdscr.getmaxyx()
+        body_h = max(1, h - self._BODY_TOP - 2)  # same body-height math as draw()
         if key in (ord("q"), ord("Q")):
             return False
         if key == curses.KEY_RIGHT:
@@ -853,11 +865,9 @@ class OverviewApp:
             self.focus = "proxy"
             self.proxy_tab = PROXY_TABS[key - ord("1")]
         elif key in (curses.KEY_UP, curses.KEY_DOWN):
-            self._move(-1 if key == curses.KEY_UP else 1)
+            self._move(-1 if key == curses.KEY_UP else 1, body_h)
         elif key in (curses.KEY_PPAGE, curses.KEY_NPAGE):
-            h, _ = stdscr.getmaxyx()
-            page = max(1, h - self._BODY_TOP - 2)  # same body-height math as draw()
-            self._move(-page if key == curses.KEY_PPAGE else page)
+            self._move(-body_h if key == curses.KEY_PPAGE else body_h, body_h)
         elif key in (10, 13, curses.KEY_ENTER) and tab == TAB_STACKS:
             if self.idx[TAB_STACKS] == len(self.rows[TAB_STACKS]):  # the "+ New stack" row
                 return self._new_stack(stdscr) is not False
@@ -868,12 +878,16 @@ class OverviewApp:
                 return False
         return True
 
-    def _move(self, delta):
+    def _move(self, delta, visible=None):
+        """`visible` is the log pane's current body height - only TAB_LOG needs it, to clamp
+        log_offset so the oldest-entries end always lands on a full page too (see
+        _draw_log_tab), not just the live/newest end which clamping at 0 already covered."""
         tab = self.current_tab()
         if tab in SELECTABLE_TABS:
             self._select(tab, self.idx[tab] + delta)
         elif tab == TAB_LOG:
-            self.log_offset = max(0, min(len(self.rows[TAB_LOG]) - 1, self.log_offset - delta))
+            max_offset = max(0, len(self.rows[TAB_LOG]) - (visible or 1))
+            self.log_offset = max(0, min(max_offset, self.log_offset + delta))
         # TAB_PORTS: read-only view of whichever stack TAB_STACKS has selected - nothing to move
 
     # -- Stacks tab -------------------------------------------------------
